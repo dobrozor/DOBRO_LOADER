@@ -1,0 +1,12 @@
+# Byte-compiled
+__pycache__/
+*.py[cod]
+
+# Environments
+.venv/
+
+# IDE
+.idea/
+
+# Ruff
+.ruff_cache/

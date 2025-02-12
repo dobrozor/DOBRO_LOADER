@@ -1,0 +1,20 @@
+[project]
+name = "kinescope-dl"
+version = "1.0.0"
+description = "A command-line Kinescope video downloader"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "pre-commit>=4.1.0",
+    "ruff>=0.9.6",
+]
+
+[tool.ruff]
+src = ["kinescope-dl"]
+output-format = "full"
+
+[tool.ruff.format]
+quote-style = "single"
