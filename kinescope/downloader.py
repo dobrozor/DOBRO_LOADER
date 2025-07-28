@@ -121,14 +121,17 @@ class VideoDownloader:
 
     def _get_segments_urls(self, resolution: tuple[int, int]) -> dict[str:list[str]]:
         try:
-            return {
-                adaptation_set.mime_type: [
-                    segment_url.media for segment_url in adaptation_set.representations[
-                        [(r.width, r.height) for r in adaptation_set.representations].index(resolution)
-                        if adaptation_set.representations[0].height else 0
-                    ].segment_lists[0].segment_urls
-                ] for adaptation_set in self.mpd_master.periods[0].adaptation_sets
-            }
+            result = {}
+            for adaptation_set in self.mpd_master.periods[0].adaptation_sets:
+                resolutions = [(r.width, r.height) for r in adaptation_set.representations]
+                idx = resolutions.index(resolution) if adaptation_set.representations[0].height else 0
+                representation = adaptation_set.representations[idx]
+                base_url = representation.base_urls[0].base_url_value
+                result[adaptation_set.mime_type] = [
+                    base_url + (segment_url.media or '') 
+                    for segment_url in representation.segment_lists[0].segment_urls]
+
+            return result
         except ValueError:
             raise InvalidResolution('Invalid resolution specified')
 
@@ -152,12 +155,12 @@ class VideoDownloader:
         self._fetch_segments(
             self._get_segments_urls(resolution)['video/mp4'],
             self.temp_path / f'{self.kinescope_video.video_id}_video.mp4{".enc" if key else ""}',
-            'Video'
+            'Видео'
         )
         self._fetch_segments(
             self._get_segments_urls(resolution)['audio/mp4'],
             self.temp_path / f'{self.kinescope_video.video_id}_audio.mp4{".enc" if key else ""}',
-            'Audio'
+            'Аудио'
         )
 
         if key:
@@ -172,15 +175,15 @@ class VideoDownloader:
                 self.temp_path / f'{self.kinescope_video.video_id}_audio.mp4',
                 key
             )
-            print('Done')
+            print('Файл готов :)')
 
         filepath = Path(filepath).with_suffix('.mp4')
         filepath.parent.mkdir(parents=True, exist_ok=True)
 
-        print('[*] Merging tracks...', end=' ')
+        print('[*] Создаю магию...')
         self._merge_tracks(
             self.temp_path / f'{self.kinescope_video.video_id}_video.mp4',
             self.temp_path / f'{self.kinescope_video.video_id}_audio.mp4',
             filepath
         )
-        print('Done')
+        print('Файл готов :)')
