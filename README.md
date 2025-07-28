@@ -12,50 +12,43 @@
 ### Сборка
 1. Загрузите и установите последнюю версию [Python 3](https://www.python.org/downloads/)
 2. Убедитесь, что у вас установлен pip:
-    ``shell
+    ```shell
     python -m ensurepip -обновление
     ```
 3. Клонируем проект с помощью [git](https://git-scm.com/downloads):
-    ``shell
+    ```shell
     git clone https://github.com/anijackich/kinescope-dl.git
     ```
     или напрямую скачайте и распакуйте [исходный код](https://github.com/anijackich/kinescope-dl/archive/refs/heads/master.zip).
 4. Откройте консоль в каталоге проекта
 5. Установите и используйте virtualenv (необязательно):
-    shell ``
+    ```shell
     pip install virtualenv
     python3 -m venv venv
     ```
     В Windows запустите:
-    ``shell
+    ```shell
     .\venv\Scripts\activate.bat
     ```
-    В Unix или macOS запустите:
-    ``
-исходный код оболочки venv/bin/activate
-    ```
 6. Требования к установке:
-    ``shell
-    установка pip -r requirements.txt
+    ```shell
+    pip -r requirements.txt
     ```
 7. Установите PyInstaller:
-    ``shell
-    pip установить pyinstaller
+    ```shell
+    pip install pyinstaller
     ```
 8. Задайте переменные среды с путями к двоичным файлам FFmpeg и mp4decrypt:
 
    В Windows запустите: 
-   ``shell
+   ```shell
    установите FFMPEG_PATH=C:\path\to\ffmpeg.exe
    установите MP4DECRYPT_PATH=C:\path\to\mp4decrypt.exe
    ```
    В Unix или macOS запустите:
-   ``shell
+   ```shell
    экспортировать FFMPEG_PATH=/путь/к/ffmpeg
    экспортировать MP4DECRYPT_PATH=/путь/к/mp4decrypt
    ```
 9. Создайте проект:
-    ``shell
-    кинескоп pyinstaller-dl.spec
-    ```
 10. Готовый скрипт должен быть доступен в папке _dist_
