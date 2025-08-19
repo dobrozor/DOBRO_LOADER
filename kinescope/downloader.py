@@ -46,11 +46,19 @@ class VideoDownloader:
                       source_audio_filepath: str | PathLike,
                       target_filepath: str | PathLike):
         try:
-            Popen((self.ffmpeg_path,
-                   "-i", source_video_filepath,
-                   "-i", source_audio_filepath,
-                   "-c", "copy", target_filepath,
-                   "-y", "-loglevel", "error")).communicate()
+            if source_audio_filepath and Path(source_audio_filepath).exists():
+                # Если есть аудио - объединяем видео и аудио
+                Popen((self.ffmpeg_path,
+                       "-i", source_video_filepath,
+                       "-i", source_audio_filepath,
+                       "-c", "copy", target_filepath,
+                       "-y", "-loglevel", "error")).communicate()
+            else:
+                # Если аудио нет - просто копируем видео
+                Popen((self.ffmpeg_path,
+                       "-i", source_video_filepath,
+                       "-c", "copy", target_filepath,
+                       "-y", "-loglevel", "error")).communicate()
         except FileNotFoundError:
             raise FFmpegNotFoundError('FFmpeg binary was not found at the specified path')
 
@@ -123,13 +131,20 @@ class VideoDownloader:
         try:
             result = {}
             for adaptation_set in self.mpd_master.periods[0].adaptation_sets:
-                resolutions = [(r.width, r.height) for r in adaptation_set.representations]
-                idx = resolutions.index(resolution) if adaptation_set.representations[0].height else 0
-                representation = adaptation_set.representations[idx]
-                base_url = representation.base_urls[0].base_url_value
-                result[adaptation_set.mime_type] = [
-                    base_url + (segment_url.media or '') 
-                    for segment_url in representation.segment_lists[0].segment_urls]
+                if adaptation_set.representations[0].height:  # Видео
+                    resolutions = [(r.width, r.height) for r in adaptation_set.representations]
+                    idx = resolutions.index(resolution) if adaptation_set.representations[0].height else 0
+                    representation = adaptation_set.representations[idx]
+                    base_url = representation.base_urls[0].base_url_value
+                    result['video/mp4'] = [
+                        base_url + (segment_url.media or '')
+                        for segment_url in representation.segment_lists[0].segment_urls]
+                else:  # Аудио
+                    representation = adaptation_set.representations[0]
+                    base_url = representation.base_urls[0].base_url_value
+                    result['audio/mp4'] = [
+                        base_url + (segment_url.media or '')
+                        for segment_url in representation.segment_lists[0].segment_urls]
 
             return result
         except ValueError:
@@ -152,38 +167,47 @@ class VideoDownloader:
 
         key = self._get_license_key()
 
+        segments_urls = self._get_segments_urls(resolution)
+
+        # Загружаем видео
+        video_filepath = self.temp_path / f'{self.kinescope_video.video_id}_video.mp4{".enc" if key else ""}'
         self._fetch_segments(
-            self._get_segments_urls(resolution)['video/mp4'],
-            self.temp_path / f'{self.kinescope_video.video_id}_video.mp4{".enc" if key else ""}',
+            segments_urls['video/mp4'],
+            video_filepath,
             'Видео'
         )
-        self._fetch_segments(
-            self._get_segments_urls(resolution)['audio/mp4'],
-            self.temp_path / f'{self.kinescope_video.video_id}_audio.mp4{".enc" if key else ""}',
-            'Аудио'
-        )
+
+        # Загружаем аудио, если оно есть
+        audio_filepath = None
+        if 'audio/mp4' in segments_urls:
+            audio_filepath = self.temp_path / f'{self.kinescope_video.video_id}_audio.mp4{".enc" if key else ""}'
+            self._fetch_segments(
+                segments_urls['audio/mp4'],
+                audio_filepath,
+                'Аудио'
+            )
 
         if key:
-            print('[*] Decrypting...', end=' ')
-            self._decrypt_video(
-                self.temp_path / f'{self.kinescope_video.video_id}_video.mp4.enc',
-                self.temp_path / f'{self.kinescope_video.video_id}_video.mp4',
-                key
-            )
-            self._decrypt_video(
-                self.temp_path / f'{self.kinescope_video.video_id}_audio.mp4.enc',
-                self.temp_path / f'{self.kinescope_video.video_id}_audio.mp4',
-                key
-            )
-            print('Файл готов :)')
+            print('[*] Расшифровываю...', end=' ')
+            # Расшифровываем видео
+            decrypted_video_filepath = self.temp_path / f'{self.kinescope_video.video_id}_video.mp4'
+            self._decrypt_video(video_filepath, decrypted_video_filepath, key)
+            video_filepath = decrypted_video_filepath
+
+            # Расшифровываем аудио, если оно есть
+            if audio_filepath and audio_filepath.exists():
+                decrypted_audio_filepath = self.temp_path / f'{self.kinescope_video.video_id}_audio.mp4'
+                self._decrypt_video(audio_filepath, decrypted_audio_filepath, key)
+                audio_filepath = decrypted_audio_filepath
+            print('Готово')
 
         filepath = Path(filepath).with_suffix('.mp4')
         filepath.parent.mkdir(parents=True, exist_ok=True)
 
-        print('[*] Создаю магию...')
+        print('[*] Объединяю...')
         self._merge_tracks(
-            self.temp_path / f'{self.kinescope_video.video_id}_video.mp4',
-            self.temp_path / f'{self.kinescope_video.video_id}_audio.mp4',
+            video_filepath,
+            audio_filepath if audio_filepath and audio_filepath.exists() else None,
             filepath
         )
-        print('Файл готов :)')
+        print('[+] Видео успешно сохранено!')
