@@ -7,3 +7,10 @@
   Если скачали архив и хотите запустить исполняемый файл, обязательно в папку bin добавьте файл ffmpeg.exe, файл скачать с офф сайта _https://www.gyan.dev/ffmpeg/builds/ffmpeg-git-full.7z_, тут в архиве в папке bin как раз лежит наш **ffmpeg.exe**
 
   Так же если мне не доверяете, то файл mp4decrypt можете удалить и вставить свой, скачав с официального сайта _https://www.bok.net/Bento4/binaries/Bento4-SDK-1-6-0-641.x86_64-microsoft-win32.zip_ архив, так же в папке bin наш файл **mp4decrypt.exe**
+
+### Окончательный вид проекта
+Если вы сами всё хотите скомпилировать у вас всё должно выгялдеть так
+<img width="244" height="274" alt="image" src="https://github.com/user-attachments/assets/c5a0a449-5819-41b3-9ce2-0a798ec6beb0" />
+
+Главный файл естетсвенно kinescope-dl.py
+
