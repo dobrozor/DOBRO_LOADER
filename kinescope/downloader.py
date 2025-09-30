@@ -15,7 +15,146 @@ from mpegdash.parser import MPEGDASHParser, MPEGDASH
 from kinescope.kinescope import KinescopeVideo
 from kinescope.const import KINESCOPE_BASE_URL
 from kinescope.exceptions import *
+import requests
+import re
+import os
+from urllib.parse import urlparse
+import time
 
+
+def download_video(referrer, video_url, quality="720", log_callback=None):
+    """
+    Скачивает видео с Kinescope
+
+    Args:
+        referrer (str): Referrer header
+        video_url (str): URL видео
+        quality (str): Качество видео (360, 480, 720, 1080, max)
+        log_callback (function): Функция для логирования
+
+    Returns:
+        tuple: (success, message)
+    """
+
+    def log(message):
+        if log_callback:
+            log_callback(message)
+        else:
+            print(message)
+
+    try:
+        log("🔍 Анализируем URL видео...")
+
+        # Извлекаем ID видео из URL
+        video_id_match = re.search(r'kinescope\.io/([a-zA-Z0-9]+)', video_url)
+        if not video_id_match:
+            return False, "Неверный URL видео Kinescope"
+
+        video_id = video_id_match.group(1)
+        log(f"📹 ID видео: {video_id}")
+
+        # Формируем URL для получения информации о видео
+        info_url = f"https://kinescope.io/embed/{video_id}"
+
+        # Заголовки для запроса
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Referer': referrer,
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'ru-RU,ru;q=0.8,en-US;q=0.5,en;q=0.3',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'DNT': '1',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Cache-Control': 'max-age=0'
+        }
+
+        log("🌐 Получаем информацию о видео...")
+        response = requests.get(info_url, headers=headers, timeout=30)
+
+        if response.status_code != 200:
+            return False, f"Ошибка доступа к видео: {response.status_code}"
+
+        # Ищем m3u8 плейлист в ответе
+        m3u8_pattern = r'https://[^"\']+\.m3u8[^"\']*'
+        m3u8_matches = re.findall(m3u8_pattern, response.text)
+
+        if not m3u8_matches:
+            return False, "Не удалось найти ссылку на видео (m3u8)"
+
+        # Берем первую найденную ссылку на m3u8
+        m3u8_url = m3u8_matches[0]
+        log(f"📦 Найден m3u8 плейлист")
+
+        # Скачиваем m3u8 плейлист
+        log("📥 Загружаем плейлист...")
+        m3u8_response = requests.get(m3u8_url, headers=headers, timeout=30)
+
+        if m3u8_response.status_code != 200:
+            return False, "Ошибка загрузки плейлиста"
+
+        m3u8_content = m3u8_response.text
+
+        # Парсим m3u8 для получения сегментов
+        segment_urls = []
+        lines = m3u8_content.split('\n')
+
+        base_url = '/'.join(m3u8_url.split('/')[:-1]) + '/'
+
+        for line in lines:
+            line = line.strip()
+            if line and not line.startswith('#'):
+                if line.startswith('http'):
+                    segment_urls.append(line)
+                else:
+                    segment_urls.append(base_url + line)
+
+        if not segment_urls:
+            return False, "Не удалось найти сегменты видео"
+
+        log(f"📋 Найдено сегментов: {len(segment_urls)}")
+
+        # Создаем папку для загрузки
+        download_dir = "downloads"
+        os.makedirs(download_dir, exist_ok=True)
+
+        # Генерируем имя файла
+        filename = f"kinescope_{video_id}_{quality}p.ts"
+        filepath = os.path.join(download_dir, filename)
+
+        log(f"💾 Сохраняем как: {filename}")
+
+        # Скачиваем сегменты
+        log("⬇️ Начинаем загрузку сегментов...")
+
+        with open(filepath, 'wb') as f:
+            for i, segment_url in enumerate(segment_urls, 1):
+                try:
+                    segment_response = requests.get(segment_url, headers=headers, timeout=30)
+                    if segment_response.status_code == 200:
+                        f.write(segment_response.content)
+                        if i % 10 == 0 or i == len(segment_urls):
+                            log(f"📥 Загружено {i}/{len(segment_urls)} сегментов")
+                    else:
+                        log(f"⚠️ Ошибка загрузки сегмента {i}")
+                except Exception as e:
+                    log(f"⚠️ Ошибка при загрузке сегмента {i}: {str(e)}")
+
+                # Небольшая задержка чтобы не перегружать сервер
+                time.sleep(0.1)
+
+        log("✅ Все сегменты загружены")
+        log("🎉 Видео успешно скачано!")
+
+        return True, f"Видео сохранено как: {filepath}"
+
+    except requests.RequestException as e:
+        return False, f"Ошибка сети: {str(e)}"
+    except Exception as e:
+        return False, f"Неожиданная ошибка: {str(e)}"
 
 class VideoDownloader:
     def __init__(self, kinescope_video: KinescopeVideo,
@@ -27,20 +166,17 @@ class VideoDownloader:
         self.temp_path: Path = Path(temp_dir)
         self.temp_path.mkdir(parents=True, exist_ok=True)
 
-        if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
-            meipass_path = Path(sys._MEIPASS).resolve()
-            self.ffmpeg_path = meipass_path / 'ffmpeg'
-            self.mp4decrypt_path = meipass_path / 'mp4decrypt'
-        else:
-            self.ffmpeg_path = ffmpeg_path
-            self.mp4decrypt_path = mp4decrypt_path
+        self.ffmpeg_path = ffmpeg_path
+        self.mp4decrypt_path = mp4decrypt_path
 
         self.http = Session()
 
         self.mpd_master: MPEGDASH = self._fetch_mpd_master()
 
-    def __del__(self):
-        rmtree(self.temp_path)
+
+    def cleanup(self):
+        if self.temp_path.exists():
+            rmtree(self.temp_path)
 
     def _merge_tracks(self, source_video_filepath: str | PathLike,
                       source_audio_filepath: str | PathLike,
@@ -71,7 +207,8 @@ class VideoDownloader:
                    source_filepath,
                    target_filepath)).communicate()
         except FileNotFoundError:
-            raise FFmpegNotFoundError('mp4decrypt binary was not found at the specified path')
+            # Использовать Mp4DecryptNotFoundError
+            raise Mp4DecryptNotFoundError('mp4decrypt binary was not found at the specified path')
 
     def _get_license_key(self) -> str:
         try:
@@ -102,17 +239,19 @@ class VideoDownloader:
     def _fetch_segment(self,
                        segment_url: str,
                        file):
-        for _ in range(5):
+        for attempt in range(5):
             try:
-                copyfileobj(
-                    BytesIO(self.http.get(segment_url, stream=True).content),
-                    file
-                )
+
+                with self.http.get(segment_url, stream=True) as r:
+                    r.raise_for_status()
+                    copyfileobj(r.raw, file)
                 return
             except ChunkedEncodingError:
-                pass
-
-        raise SegmentDownloadError(f'Failed to download segment {segment_url}')
+                if attempt == 9:
+                    raise SegmentDownloadError(f'Failed to download segment {segment_url} after 10 attempts')
+            except Exception as e:
+                # Обработка других возможных ошибок HTTP
+                raise SegmentDownloadError(f'Failed to download segment {segment_url}: {e}')
 
     def _fetch_segments(self,
                         segments_urls: list[str],
