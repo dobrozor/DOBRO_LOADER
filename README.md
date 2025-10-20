@@ -11,6 +11,7 @@
 
 ### Окончательный вид проекта
 Если вы сами всё хотите скомпилировать у вас всё должно выгялдеть так
+
 <img width="452" height="417" alt="image" src="https://github.com/user-attachments/assets/d37f164d-3af6-4b8d-ad35-4655ecc4b14f" />
 
 
