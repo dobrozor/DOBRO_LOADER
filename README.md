@@ -4,15 +4,17 @@
 Просто скачайте релиз и запустите его, все остальные файлы подтянуться сами
 
 # ВАЖНО
-  Если скачали архив и хотите запустить исполняемый файл, обязательно в папку bin добавьте файл ffmpeg.exe, файл скачать с офф сайта _https://www.gyan.dev/ffmpeg/builds/ffmpeg-git-full.7z_, тут в архиве в папке bin как раз лежит наш **ffmpeg.exe**
+  Если скачали архив и хотите запустить исполняемый файл, обязательно в папку bin добавьте файл ffmpeg.exe и N_m3u8DL-RE.exe, файл скачать с офф сайта _https://www.gyan.dev/ffmpeg/builds/ffmpeg-git-full.7z_, тут в архиве в папке bin как раз лежит наш **ffmpeg.exe**
 
   Так же если мне не доверяете, то файл mp4decrypt можете удалить и вставить свой, скачав с официального сайта _https://www.bok.net/Bento4/binaries/Bento4-SDK-1-6-0-641.x86_64-microsoft-win32.zip_ архив, так же в папке bin наш файл **mp4decrypt.exe**
+  А так же если доверия так же нет, файл N_m3u8DL-RE можно скачать официально отсюда https://github.com/nilaoda/N_m3u8DL-RE
 
 ### Окончательный вид проекта
 Если вы сами всё хотите скомпилировать у вас всё должно выгялдеть так
-<img width="244" height="274" alt="image" src="https://github.com/user-attachments/assets/c5a0a449-5819-41b3-9ce2-0a798ec6beb0" />
+<img width="452" height="417" alt="image" src="https://github.com/user-attachments/assets/d37f164d-3af6-4b8d-ad35-4655ecc4b14f" />
 
-Главный файл естетсвенно kinescope-dl.py
+
+Главный файл естетсвенно main.py
 
 ## Для вопросов
 По всем моим проектам пишите сюда - https://t.me/talk_dobrozor
