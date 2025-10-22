@@ -63,7 +63,7 @@ def validate_url(url):
 
 
 def extract_from_json(json_filepath):
-    """Извлекает URL и Referer из JSON файла"""
+    """Извлекает URL, Referer и Title из JSON файла"""
     try:
         with open(json_filepath, 'r', encoding='utf-8') as f:
             data = json.load(f)
@@ -71,12 +71,13 @@ def extract_from_json(json_filepath):
         video_url = data.get('url', '')
         referer = data.get('referrer', '')
         video_id = data.get('meta', {}).get('videoId', '')
+        # НОВОЕ: Извлечение названия видео
+        video_title = data.get('meta', {}).get('title', '')
 
-        return video_url, referer, video_id, data
+        return video_url, referer, video_id, data, video_title # ОБНОВЛЕНИЕ: добавлено video_title
 
     except Exception as e:
         raise ValueError(f"Ошибка чтения JSON файла: {str(e)}")
-
 
 class KinescopeDownloaderGUI:
     def __init__(self, root):
@@ -101,6 +102,8 @@ class KinescopeDownloaderGUI:
         self.json_data = None
         self.available_qualities = []
         self.drm_keys = []
+        self.video_title = tk.StringVar(value="")
+
 
         self.setup_ui()
 
@@ -232,31 +235,20 @@ class KinescopeDownloaderGUI:
         self.progress_text.pack(fill="x", padx=20, pady=(0, 20))
         self.progress_text.configure(state="disabled")
 
-        # Кнопки загрузки
+        # Кнопка загрузки (ОБНОВЛЕНИЕ: ОДНА КНОПКА)
         download_buttons_frame = ctk.CTkFrame(main_container, fg_color="transparent")
         download_buttons_frame.pack(fill="x", pady=(0, 10))
 
-        self.download_button_1 = ctk.CTkButton(download_buttons_frame,
-                                               text="Скачать (1 способ)",
-                                               text_color="#2C3E50",
-                                               command=lambda: self.start_download(1),
-                                               state="disabled",
-                                               height=45,
-                                               font=ctk.CTkFont(size=14),
-                                               fg_color="#3498DB",
-                                               hover_color="#2980B9")
-        self.download_button_1.pack(side="left", fill="x", expand=True, padx=(0, 5))
-
-        self.download_button_2 = ctk.CTkButton(download_buttons_frame,
-                                               text="Скачать (2 способ)",
-                                               text_color="#2C3E50",
-                                               command=lambda: self.start_download(2),
-                                               state="disabled",
-                                               height=45,
-                                               font=ctk.CTkFont(size=14),
-                                               fg_color="#27AE60",
-                                               hover_color="#229954")
-        self.download_button_2.pack(side="right", fill="x", expand=True, padx=(5, 0))
+        self.download_button = ctk.CTkButton(download_buttons_frame,
+                                             text="Скачать",
+                                             text_color="#FFFFFF",  # Белый цвет текста для зеленого фона
+                                             command=self.start_unified_download,  # ОБНОВЛЕНИЕ
+                                             state="disabled",
+                                             height=45,
+                                             font=ctk.CTkFont(size=16, weight="bold"),
+                                             fg_color="#27AE60",
+                                             hover_color="#229954")
+        self.download_button.pack(fill="x", expand=True)  # ОБНОВЛЕНИЕ
 
         # Кнопки управления
         button_frame = ctk.CTkFrame(main_container, fg_color="transparent")
@@ -292,7 +284,8 @@ class KinescopeDownloaderGUI:
             return
 
         try:
-            video_url, referer, video_id, json_data = extract_from_json(filename)
+            # ОБНОВЛЕНИЕ: Получаем video_title
+            video_url, referer, video_id, json_data, video_title = extract_from_json(filename)
             self.json_data = json_data
 
             if not video_url:
@@ -306,15 +299,29 @@ class KinescopeDownloaderGUI:
             self.video_url.set(video_url)
             self.referer_url.set(referer)
             self.current_json_file.set(filename)
+            self.video_title.set(video_title)  # НОВОЕ: Устанавливаем название
 
             file_name = os.path.basename(filename)
             self.json_status_label.configure(text=f"✓ {file_name}", text_color="#27AE60")
             self.qualities_status_label.configure(text="Получаем список качеств и ключи...", text_color="#3498DB")
 
+            # НОВОЕ: Сразу предлагаем название в поле сохранения
+            self._set_default_output_filename(video_title)
+
             self.fetch_qualities_and_keys()
 
         except Exception as e:
             messagebox.showerror("Ошибка", f"Ошибка при загрузке JSON файла:\n{str(e)}")
+
+    def _set_default_output_filename(self, title):
+        """Форматирует название для имени файла и устанавливает его"""
+        if title:
+            # Очищаем название от недопустимых символов и устанавливаем .mp4
+            safe_title = re.sub(r'[\\/:*?"<>|]', '_', title)
+            default_filename = safe_title + ".mp4"
+            # Если путь для сохранения еще не установлен, устанавливаем его в текущую директорию
+            if not self.output_file.get() or self.output_file.get().endswith(".mp4"):
+                self.output_file.set(os.path.join(os.getcwd(), default_filename))
 
     def fetch_qualities_and_keys(self):
         """Получает список качеств и DRM ключи"""
@@ -393,18 +400,47 @@ class KinescopeDownloaderGUI:
 
     def _fetch_drm_keys(self):
         """Получает DRM ключи для второго способа скачивания"""
+        pssh_list = []
+        license_url_list = []
+
+        mpd_url, m3u8_url = self._extract_stream_urls()
+
+        # --- Поиск 1: В MPD (DASH) ---
+        if mpd_url:
+            try:
+                self.add_progress_message("[*] Поиск PSSH и License URL в MPD (DASH)...")
+                mpd_content = requests.get(mpd_url, timeout=10).text
+                pssh_list = re.findall(r'<cenc:pssh[^>]*>([^<]+)</cenc:pssh>', mpd_content)
+                license_url_list = re.findall(r'<dashif:Laurl>([^<]+)</dashif:Laurl>', mpd_content)
+            except Exception as e:
+                self.root.after(0, lambda: self.add_progress_message(f"[!] Ошибка при чтении MPD: {str(e)}"))
+
+        # --- Поиск 2: В M3U8 (HLS) с помощью новой логики ---
+        if not pssh_list and m3u8_url:
+            self.add_progress_message("[*] Поиск PSSH и License URL в M3U8 (HLS)...")
+            license_url_hls, pssh_hls = self._extract_pssh_from_hls(m3u8_url)
+
+            if pssh_hls:
+                pssh_list.append(pssh_hls)
+            if license_url_hls:
+                license_url_list.append(license_url_hls)
+
+        # --- Получение ключей ---
         try:
-            mpd_url, m3u8_url = self._extract_stream_urls()
+            if pssh_list and license_url_list:
+                # Берем первый уникальный PSSH и License URL
+                final_pssh = list(set(pssh_list))[0]
+                final_license_url = list(set(license_url_list))[0]
 
-            if mpd_url:
-                mpd_content = requests.get(mpd_url).text
-                pssh = re.findall(r'<cenc:pssh[^>]*>([^<]+)</cenc:pssh>', mpd_content)
-                license_url = re.findall(r'<dashif:Laurl>([^<]+)</dashif:Laurl>', mpd_content)
+                self.add_progress_message("[*] Декодирование ключей с помощью pywidevine...")
+                keys = self.get_key(final_pssh, final_license_url, self.referer_url.get())
+                self.drm_keys = keys
+                self.root.after(0, lambda: self.add_progress_message(f"[+] Получено DRM ключей: {len(keys)}"))
+                return
 
-                if pssh and license_url:
-                    keys = self.get_key(list(set(pssh))[0], list(set(license_url))[0], self.referer_url.get())
-                    self.drm_keys = keys
-                    self.root.after(0, lambda: self.add_progress_message(f"[+] Получено DRM ключей: {len(keys)}"))
+            self.root.after(0, lambda: self.add_progress_message(
+                "[!] Не удалось найти PSSH и License URL в потоках (MPD/M3U8)."))
+
         except Exception as e:
             self.root.after(0, lambda: self.add_progress_message(f"[!] Ошибка получения DRM ключей: {str(e)}"))
 
@@ -481,18 +517,34 @@ class KinescopeDownloaderGUI:
                 text_color="#27AE60"
             )
 
-            self.download_button_1.configure(state="normal")
-            self.download_button_2.configure(state="normal")
+            # ОБНОВЛЕНИЕ: Только одна кнопка
+            self.download_button.configure(state="normal")
 
     def browse_file(self):
+        """Открывает диалог сохранения файла с предложенным названием"""
+
+        default_name = ""
+        # НОВОЕ: Используем название видео, если оно есть
+        if self.video_title.get():
+            default_name = re.sub(r'[\\/:*?"<>|]', '_', self.video_title.get())
+
+        # Используем os.path.split для разделения пути и имени.
+        # Если название еще не установлено, os.getcwd() будет путем.
+        initial_dir = os.path.dirname(self.output_file.get()) if self.output_file.get() else os.getcwd()
+        initial_file = os.path.basename(self.output_file.get()) if self.output_file.get() else default_name + ".mp4"
+
         filename = filedialog.asksaveasfilename(
             defaultextension=".mp4",
-            filetypes=[("MP4 files", "*.mp4"), ("All files", "*.*")]
+            filetypes=[("MP4 files", "*.mp4"), ("All files", "*.*")],
+            # НОВОЕ: Передаем предложенное имя файла
+            initialfile=initial_file,
+            initialdir=initial_dir
         )
         if filename:
             self.output_file.set(filename)
 
-    def start_download(self, method):
+    # ОБНОВЛЕНИЕ: Новая функция для запуска единого процесса
+    def start_unified_download(self):
         if self.download_in_progress:
             return
 
@@ -508,43 +560,42 @@ class KinescopeDownloaderGUI:
         self.progress_card.pack(fill="x", pady=(0, 20))
 
         self.download_in_progress = True
-        self.download_button_1.configure(state="disabled")
-        self.download_button_2.configure(state="disabled")
+        self.download_button.configure(state="disabled")  # Только одна кнопка
 
         # Очищаем предыдущий прогресс
         self.progress_text.configure(state="normal")
         self.progress_text.delete("1.0", "end")
         self.progress_text.configure(state="disabled")
 
-        download_thread = threading.Thread(target=self.download_video, args=(method,))
+        download_thread = threading.Thread(target=self.download_video_with_fallback)  # Новая функция
         download_thread.daemon = True
         download_thread.start()
 
-    def download_video(self, method):
+    # ОБНОВЛЕНИЕ: Функция с каскадной логикой
+    def download_video_with_fallback(self):
         try:
-            if method == 1:
-                self.add_progress_message("[*] Запуск скачивания (1 способ)...")
-                success = self._download_method_1()
-                if not success:
-                    self.add_progress_message("[!] Первый способ не сработал, пробуем второй...")
-                    self._download_method_2()
-            else:
-                self.add_progress_message("[*] Запуск скачивания (2 способ)...")
-                self._download_method_2()
+            self.add_progress_message("[*] Запуск скачивания. Сначала пробуем Способ 2 (N_m3u8DL-RE)...")
+
+            # Попытка Способа 2
+            success = self._download_method_2()
+
+            if not success:
+                self.add_progress_message("[!] Способ 2 не сработал. Пробуем Способ 1 (kinescope)...")
+                self._download_method_1()  # Fallback to Method 1
 
         except Exception as e:
-            self.show_error(f"Ошибка при загрузке видео: {str(e)}")
+            # Если оба метода не смогли завершить процесс (или произошла критическая ошибка)
+            self.show_error(f"Критическая ошибка при загрузке видео: {str(e)}")
         finally:
             self.download_in_progress = False
-            self.download_button_1.configure(state="normal")
-            self.download_button_2.configure(state="normal")
+            self.download_button.configure(state="normal")  # Только одна кнопка
 
     def _download_method_1(self):
         """Первый способ скачивания (стандартный)"""
         try:
             from kinescope import KinescopeVideo, KinescopeDownloader
 
-            self.add_progress_message("[*] Подготовка к загрузке (1 способ)...")
+            self.add_progress_message("[*] Подготовка к загрузке (Способ 1)...")
 
             bin_dir = setup_bin_directory()
             ffmpeg_path = os.path.join(bin_dir, "ffmpeg.exe")
@@ -601,16 +652,17 @@ class KinescopeDownloaderGUI:
             downloader.download(self.output_file.get(), chosen_resolution)
 
             # Успешное завершение
-            self.add_progress_message("[+] Видео успешно сохранено!")
+            self.add_progress_message("[+] Видео успешно сохранено (Способ 1)!")
             messagebox.showinfo("Успех", f"Видео успешно скачано!\nФайл: {self.output_file.get()}")
-            return True
+            return True  # ОБНОВЛЕНИЕ: Возврат True
 
         except Exception as e:
             self.add_progress_message(f"[!] Ошибка в первом способе: {str(e)}")
-            return False
+            return False  # ОБНОВЛЕНИЕ: Возврат False
         finally:
             if 'downloader' in locals():
-                downloader.cleanup()
+                # downloader.cleanup() - Оставляем как было, хотя явная очистка тут может быть полезной
+                pass
 
     def _download_method_2(self):
         """Второй способ скачивания (через N_m3u8DL-RE)"""
@@ -622,8 +674,10 @@ class KinescopeDownloaderGUI:
 
             selected_quality = self.quality_combo.get().replace('p', '')
 
+            # Важно: если DRM ключи не получены, Способ 2, скорее всего, не сработает
             if not self.drm_keys:
-                raise Exception("DRM ключи не получены")
+                self.add_progress_message("[!] DRM ключи не получены. Способ 2 невозможен.")
+                return False
 
             bin_dir = setup_bin_directory()
             n_m3u8dl_path = os.path.join(bin_dir, "N_m3u8DL-RE.exe")
@@ -661,20 +715,149 @@ class KinescopeDownloaderGUI:
                             last_progress = progress_info
 
             if process.returncode == 0:
-                self.add_progress_message("\n[+] Скачивание завершено!")
+                self.add_progress_message("\n[+] Скачивание завершено (Способ 2)!")
                 messagebox.showinfo("Успех", f"Видео успешно скачано!\nФайл: {output_path}")
+                return True  # ОБНОВЛЕНИЕ: Возврат True
             else:
-                raise Exception(f"N_m3u8DL-RE завершился с ошибкой: {process.returncode}")
+                self.add_progress_message(f"[!] N_m3u8DL-RE завершился с ошибкой: {process.returncode}")
+                return False  # ОБНОВЛЕНИЕ: Возврат False
 
         except Exception as e:
-            raise Exception(f"Ошибка во втором способе: {str(e)}")
+            self.add_progress_message(f"[!] Ошибка во втором способе: {str(e)}")
+            return False  # ОБНОВЛЕНИЕ: Возврат False
+
+    def _extract_pssh_from_hls(self, master_m3u8_url_full):
+        """
+        Извлекает Widevine License URL и PSSH-ключ из связанного M3U8-файла.
+        Адаптировано из 'get pssh.py'.
+        Возвращает: (license_url, pssh_key) или (None, None) в случае ошибки.
+        """
+        license_url = None
+        pssh_key = None
+
+        # --- ШАГ 1: Извлечение Widevine License URL из JSON (повторение логики) ---
+        if self.json_data:
+            try:
+                # 1. Попытка Widevine
+                license_url = self.json_data['options']['playlist'][0]['drm']['widevine']['licenseUrl']
+            except (KeyError, IndexError):
+                # 2. Попытка Clearkey (Clearkey ключи не ищем, только Widevine License URL)
+                try:
+                    license_url = self.json_data['options']['playlist'][0]['drm']['clearkey']['licenseUrl']
+                except (KeyError, IndexError):
+                    pass
+
+        if not license_url:
+            self.add_progress_message("[!] Ошибка: Не удалось найти widevine/clearkey licenseUrl в JSON.")
+            return None, None
+
+        # --- ШАГ 2: Извлечение PSSH-ключа из M3U8-файлов ---
+        try:
+            # Получаем чистый base_url (без параметров) для запроса master.m3u8
+            base_url_match = re.search(r'^(https?://[^?]+?/master\.m3u8)', master_m3u8_url_full)
+            if not base_url_match:
+                self.add_progress_message("[!] Ошибка: Не удалось извлечь базовую URL для master.m3u8.")
+                return license_url, None
+
+            base_url_clean = base_url_match.group(1)
+            base_url_prefix = base_url_clean.replace('/master.m3u8', '')
+
+            # Восстанавливаем общие query-параметры
+            query_params_match = re.search(r'\?(.*)', master_m3u8_url_full)
+            token_params_list = []
+            if query_params_match:
+                for p in query_params_match.group(1).split('&'):
+                    if p.startswith(('expires', 'sign', 'token', 'kinescope_project_id')) and (
+                            len(p.split('=')) == 1 or p.split('=')[1]):
+                        token_params_list.append(p)
+            token_params = "&".join(token_params_list)
+
+            # 1. Запрос master.m3u8
+            master_response = requests.get(base_url_clean, timeout=10)
+            master_response.raise_for_status()
+            master_content = master_response.text
+
+            # 2. Поиск всех ссылок на медиа-потоки (видео или аудио) с максимальным битрейтом
+            stream_matches = re.findall(
+                r'#EXT-X-STREAM-INF:.*?BANDWIDTH=(\d+).*?\n(media\.m3u8\?.*?)\n',
+                master_content,
+                re.DOTALL
+            )
+
+            # Добавляем поиск аудио потоков, как в 'get pssh.py', для более надежного извлечения PSSH
+            audio_matches = re.findall(
+                r'#EXT-X-MEDIA:TYPE=AUDIO.*?URI="([^"]+?media\.m3u8[^"]+?)"',
+                master_content,
+                re.DOTALL
+            )
+
+            media_streams = [(int(bandwidth), media_path) for bandwidth, media_path in stream_matches]
+            # Аудио потокам даем высокий битрейт, чтобы их тоже проверило
+            for audio_path in audio_matches:
+                media_streams.append((999999999, audio_path))
+
+            media_streams.sort(key=lambda x: x[0], reverse=True)
+
+            if not media_streams:
+                self.add_progress_message("[!] Ошибка: Не найдено потоков media.m3u8 в master.m3u8.")
+                return license_url, None
+
+            # 3. Перебор потоков и поиск PSSH
+            for _, media_path_relative in media_streams:
+                media_path_relative_clean = media_path_relative.split('?')[0]
+                media_query_params_match = re.search(r'\?(.*)', media_path_relative)
+                media_query_params = media_query_params_match.group(1) if media_query_params_match else ""
+
+                # Формируем полную ссылку для запроса к media.m3u8
+                m3u8_url_checked = f"{base_url_prefix}/{media_path_relative_clean}?{media_query_params}&{token_params}"
+                m3u8_url_checked = m3u8_url_checked.replace('&&', '&').rstrip('&')
+                # Удаляем пустой токен, если есть
+                m3u8_url_checked = re.sub(r'&token=(&|$)', r'\1', m3u8_url_checked).rstrip('&')
+
+                try:
+                    # Запрос media.m3u8
+                    media_response = requests.get(m3u8_url_checked, timeout=10)
+                    media_response.raise_for_status()
+                    media_content = media_response.text
+
+                    # Поиск PSSH-ключа Widevine в формате base64
+                    pssh_match = re.search(
+                        r'#EXT-X-KEY.*?KEYFORMAT="urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed".*?URI="data:text/plain;base64,([^"]+)"',
+                        media_content,
+                        re.DOTALL
+                    )
+                    # Дополнительный поиск для надежности
+                    if not pssh_match:
+                        pssh_match = re.search(
+                            r'#EXT-X-KEY.*?URI="data:text/plain;base64,([^"]+)".*?KEYFORMAT="urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed"',
+                            media_content,
+                            re.DOTALL
+                        )
+
+                    if pssh_match:
+                        pssh_key = pssh_match.group(1)
+                        self.add_progress_message("[+] PSSH и License URL найдены в M3U8.")
+                        return license_url, pssh_key  # Возвращаем найденные значения
+
+                except requests.exceptions.RequestException:
+                    continue  # Пробуем следующий поток
+
+            self.add_progress_message("[!] PSSH-ключ не найден ни в одном потоке media.m3u8.")
+            return license_url, None
+
+        except requests.exceptions.RequestException as e:
+            self.add_progress_message(f"[!] Ошибка запроса M3U8: {e}")
+            return license_url, None
+        except Exception as e:
+            self.add_progress_message(f"[!] Произошла непредвиденная ошибка при поиске PSSH в HLS: {e}")
+            return license_url, None
 
     def show_error(self, message):
         self.add_progress_message(f"[!] {message}")
         messagebox.showerror("Ошибка", message)
         self.download_in_progress = False
-        self.download_button_1.configure(state="normal")
-        self.download_button_2.configure(state="normal")
+        # ОБНОВЛЕНИЕ: Только одна кнопка
+        self.download_button.configure(state="normal")
 
     def clear_fields(self):
         self.video_url.set("")
@@ -690,8 +873,8 @@ class KinescopeDownloaderGUI:
         self.drm_keys = []
         self.json_status_label.configure(text="Файл не выбран", text_color="#7F8C8D")
         self.qualities_status_label.configure(text="Загрузите JSON файл", text_color="#7F8C8D")
-        self.download_button_1.configure(state="disabled")
-        self.download_button_2.configure(state="disabled")
+        # ОБНОВЛЕНИЕ: Только одна кнопка
+        self.download_button.configure(state="disabled")
         self.progress_card.pack_forget()
 
 
