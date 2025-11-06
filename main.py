@@ -71,19 +71,19 @@ def extract_from_json(json_filepath):
         video_url = data.get('url', '')
         referer = data.get('referrer', '')
         video_id = data.get('meta', {}).get('videoId', '')
-        # НОВОЕ: Извлечение названия видео
         video_title = data.get('meta', {}).get('title', '')
 
-        return video_url, referer, video_id, data, video_title # ОБНОВЛЕНИЕ: добавлено video_title
+        return video_url, referer, video_id, data, video_title
 
     except Exception as e:
         raise ValueError(f"Ошибка чтения JSON файла: {str(e)}")
+
 
 class KinescopeDownloaderGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("DOBRO LOADER")
-        self.root.geometry("500x850")
+        self.root.geometry("500x650")  # Уменьшена высота
         self.root.resizable(True, True)
 
         # Цветовая схема
@@ -104,19 +104,33 @@ class KinescopeDownloaderGUI:
         self.drm_keys = []
         self.video_title = tk.StringVar(value="")
 
-
         self.setup_ui()
 
     def setup_ui(self):
-        # Главный контейнер
-        main_container = ctk.CTkFrame(self.root, fg_color=self.light_bg)
-        main_container.pack(fill="both", expand=True, padx=20, pady=20)
+        # Главный контейнер с прокруткой
+        main_frame = ctk.CTkFrame(self.root, fg_color=self.light_bg)
+        main_frame.pack(fill="both", expand=True, padx=15, pady=15)  # Уменьшены отступы
 
-        # Заголовок с логотипом
-        header_frame = ctk.CTkFrame(main_container, fg_color="transparent")
-        header_frame.pack(fill="x", pady=(0, 20))
+        # Canvas для прокрутки
+        self.canvas = tk.Canvas(main_frame, bg=self.light_bg, highlightthickness=0)
+        scrollbar = ctk.CTkScrollbar(main_frame, orientation="vertical", command=self.canvas.yview)
+        self.scrollable_frame = ctk.CTkFrame(self.canvas, fg_color=self.light_bg)
 
-        # Логотип (остается как было)
+        self.scrollable_frame.bind(
+            "<Configure>",
+            lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+        )
+
+        self.canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
+        self.canvas.configure(yscrollcommand=scrollbar.set)
+
+        self.canvas.pack(side="left", fill="both", expand=True, padx=(0, 5))
+        scrollbar.pack(side="right", fill="y")
+
+        # Заголовок с логотипом (упрощенный)
+        header_frame = ctk.CTkFrame(self.scrollable_frame, fg_color="transparent", height=80)
+        header_frame.pack(fill="x", pady=(0, 15))
+
         try:
             logo_path = get_resource_path("logo.png")
             if os.path.exists(logo_path):
@@ -124,149 +138,166 @@ class KinescopeDownloaderGUI:
                 logo_image = ctk.CTkImage(
                     light_image=Image.open(logo_path),
                     dark_image=Image.open(logo_path),
-                    size=(375, 160)
+                    size=(300, 120)  # Уменьшен размер логотипа
                 )
                 logo_label = ctk.CTkLabel(header_frame, image=logo_image, text="")
-                logo_label.pack(pady=(10, 10))
+                logo_label.pack(pady=(5, 5))
             else:
                 title_label = ctk.CTkLabel(header_frame,
                                            text="DOBRO LOADER",
-                                           font=ctk.CTkFont(size=24, weight="bold"),
+                                           font=ctk.CTkFont(size=20, weight="bold"),  # Уменьшен шрифт
                                            text_color="#2C3E50")
-                title_label.pack(pady=(0, 10))
+                title_label.pack(pady=(5, 5))
         except Exception as e:
             title_label = ctk.CTkLabel(header_frame,
                                        text="DOBRO LOADER",
-                                       font=ctk.CTkFont(size=24, weight="bold"),
+                                       font=ctk.CTkFont(size=20, weight="bold"),
                                        text_color="#2C3E50")
-            title_label.pack(pady=(0, 10))
+            title_label.pack(pady=(5, 5))
 
         subtitle_label = ctk.CTkLabel(header_frame,
                                       text="Загрузите JSON файл для скачивания видео",
-                                      font=ctk.CTkFont(size=12),
+                                      font=ctk.CTkFont(size=11),  # Уменьшен шрифт
                                       text_color="#7F8C8D")
         subtitle_label.pack()
 
-        # Карточка загрузки JSON
-        json_card = ctk.CTkFrame(main_container, fg_color=self.card_bg, corner_radius=12)
-        json_card.pack(fill="x", pady=(0, 20))
+        # Карточка загрузки JSON (компактная)
+        json_card = ctk.CTkFrame(self.scrollable_frame, fg_color=self.card_bg, corner_radius=10, height=90)
+        json_card.pack(fill="x", pady=(0, 12))
 
         ctk.CTkLabel(json_card,
-                     text="Шаг 1: Загрузка данных",
-                     font=ctk.CTkFont(size=14, weight="bold"),
-                     text_color="#2C3E50").pack(anchor="w", padx=20, pady=(20, 10))
+                     text="1. Загрузка данных",
+                     font=ctk.CTkFont(size=12, weight="bold"),  # Уменьшен шрифт
+                     text_color="#2C3E50").pack(anchor="w", padx=15, pady=(12, 8))
 
-        json_button = ctk.CTkButton(json_card,
-                                    text="📁 Выбрать JSON файл",
+        json_button_frame = ctk.CTkFrame(json_card, fg_color="transparent")
+        json_button_frame.pack(fill="x", padx=15, pady=(0, 8))
+
+        json_button = ctk.CTkButton(json_button_frame,
+                                    text="📁 Выбрать JSON",
                                     text_color="#2C3E50",
                                     command=self.load_json_file,
                                     fg_color=self.accent_color,
                                     hover_color="#f48200",
-                                    height=40)
-        json_button.pack(fill="x", padx=20, pady=(0, 10))
+                                    height=32,  # Уменьшена высота
+                                    width=120)  # Фиксированная ширина
+        json_button.pack(side="left")
 
-        self.json_status_label = ctk.CTkLabel(json_card,
+        self.json_status_label = ctk.CTkLabel(json_button_frame,
                                               text="Файл не выбран",
-                                              font=ctk.CTkFont(size=11),
+                                              font=ctk.CTkFont(size=10),  # Уменьшен шрифт
                                               text_color="#7F8C8D")
-        self.json_status_label.pack(anchor="w", padx=20, pady=(0, 20))
+        self.json_status_label.pack(side="left", padx=(10, 0))
 
-        # Карточка качества
-        self.quality_card = ctk.CTkFrame(main_container, fg_color=self.card_bg, corner_radius=12)
-        self.quality_card.pack(fill="x", pady=(0, 20))
+        # Карточка качества (компактная)
+        self.quality_card = ctk.CTkFrame(self.scrollable_frame, fg_color=self.card_bg, corner_radius=10, height=90)
+        self.quality_card.pack(fill="x", pady=(0, 12))
 
         ctk.CTkLabel(self.quality_card,
-                     text="Шаг 2: Выбор качества",
-                     font=ctk.CTkFont(size=14, weight="bold"),
-                     text_color="#2C3E50").pack(anchor="w", padx=20, pady=(20, 10))
+                     text="2. Выбор качества",
+                     font=ctk.CTkFont(size=12, weight="bold"),
+                     text_color="#2C3E50").pack(anchor="w", padx=15, pady=(12, 8))
 
-        self.quality_combo = ctk.CTkComboBox(self.quality_card,
+        quality_frame = ctk.CTkFrame(self.quality_card, fg_color="transparent")
+        quality_frame.pack(fill="x", padx=15, pady=(0, 8))
+
+        self.quality_combo = ctk.CTkComboBox(quality_frame,
                                              variable=self.selected_quality,
                                              state="readonly",
-                                             height=35,
+                                             height=32,  # Уменьшена высота
+                                             width=120,  # Фиксированная ширина
                                              border_color="#E0E0E0")
-        self.quality_combo.pack(fill="x", padx=20, pady=(0, 10))
+        self.quality_combo.pack(side="left")
         self.quality_combo.set("")
 
-        self.qualities_status_label = ctk.CTkLabel(self.quality_card,
+        self.qualities_status_label = ctk.CTkLabel(quality_frame,
                                                    text="Загрузите JSON файл",
-                                                   font=ctk.CTkFont(size=11),
+                                                   font=ctk.CTkFont(size=10),
                                                    text_color="#7F8C8D")
-        self.qualities_status_label.pack(anchor="w", padx=20, pady=(0, 20))
+        self.qualities_status_label.pack(side="left", padx=(10, 0))
 
-        # Карточка сохранения
-        save_card = ctk.CTkFrame(main_container, fg_color=self.card_bg, corner_radius=12)
-        save_card.pack(fill="x", pady=(0, 20))
+        # Карточка сохранения (компактная)
+        save_card = ctk.CTkFrame(self.scrollable_frame, fg_color=self.card_bg, corner_radius=10, height=90)
+        save_card.pack(fill="x", pady=(0, 12))
 
         ctk.CTkLabel(save_card,
-                     text="Шаг 3: Сохранение",
-                     font=ctk.CTkFont(size=14, weight="bold"),
-                     text_color="#2C3E50").pack(anchor="w", padx=20, pady=(20, 10))
+                     text="3. Сохранение",
+                     font=ctk.CTkFont(size=12, weight="bold"),
+                     text_color="#2C3E50").pack(anchor="w", padx=15, pady=(12, 8))
 
         save_frame = ctk.CTkFrame(save_card, fg_color="transparent")
-        save_frame.pack(fill="x", padx=20, pady=(0, 10))
+        save_frame.pack(fill="x", padx=15, pady=(0, 8))
 
         self.file_entry = ctk.CTkEntry(save_frame,
                                        textvariable=self.output_file,
-                                       placeholder_text="Выберите путь для сохранения...",
-                                       height=35)
-        self.file_entry.pack(side="left", fill="x", expand=True, padx=(0, 10))
+                                       placeholder_text="Путь для сохранения...",
+                                       height=32)  # Уменьшена высота
+        self.file_entry.pack(side="left", fill="x", expand=True, padx=(0, 8))
 
         browse_button = ctk.CTkButton(save_frame,
                                       text="Обзор",
                                       command=self.browse_file,
-                                      width=80,
-                                      height=35,
+                                      width=70,  # Уменьшена ширина
+                                      height=32,
                                       fg_color="#34495E",
                                       hover_color="#2C3E50")
         browse_button.pack(side="right")
 
-        # Карточка прогресса
-        self.progress_card = ctk.CTkFrame(main_container, fg_color=self.card_bg, corner_radius=12)
-        self.progress_card.pack(fill="x", pady=(0, 20))
-
-        ctk.CTkLabel(self.progress_card,
-                     text="Прогресс загрузки",
-                     font=ctk.CTkFont(size=14, weight="bold"),
-                     text_color="#2C3E50").pack(anchor="w", padx=20, pady=(20, 10))
-
-        self.progress_text = ctk.CTkTextbox(self.progress_card, height=120,
-                                            font=ctk.CTkFont(family="Consolas", size=11))
-        self.progress_text.pack(fill="x", padx=20, pady=(0, 20))
-        self.progress_text.configure(state="disabled")
-
-        # Кнопка загрузки (ОБНОВЛЕНИЕ: ОДНА КНОПКА)
-        download_buttons_frame = ctk.CTkFrame(main_container, fg_color="transparent")
-        download_buttons_frame.pack(fill="x", pady=(0, 10))
+        # Кнопка загрузки (более компактная)
+        download_buttons_frame = ctk.CTkFrame(self.scrollable_frame, fg_color="transparent", height=50)
+        download_buttons_frame.pack(fill="x", pady=(5, 5))
 
         self.download_button = ctk.CTkButton(download_buttons_frame,
-                                             text="Скачать",
-                                             text_color="#FFFFFF",  # Белый цвет текста для зеленого фона
-                                             command=self.start_unified_download,  # ОБНОВЛЕНИЕ
+                                             text="Скачать видео",
+                                             text_color="#FFFFFF",
+                                             command=self.start_unified_download,
                                              state="disabled",
-                                             height=45,
-                                             font=ctk.CTkFont(size=16, weight="bold"),
+                                             height=38,  # Уменьшена высота
+                                             font=ctk.CTkFont(size=14, weight="bold"),
                                              fg_color="#27AE60",
                                              hover_color="#229954")
-        self.download_button.pack(fill="x", expand=True)  # ОБНОВЛЕНИЕ
+        self.download_button.pack(fill="x", expand=True)
 
-        # Кнопки управления
-        button_frame = ctk.CTkFrame(main_container, fg_color="transparent")
-        button_frame.pack(fill="x")
+        # Кнопки управления (компактные)
+        button_frame = ctk.CTkFrame(self.scrollable_frame, fg_color="transparent", height=40)
+        button_frame.pack(fill="x", pady=(5, 0))
 
         clear_button = ctk.CTkButton(button_frame,
                                      text="Очистить",
                                      command=self.clear_fields,
-                                     height=45,
+                                     height=32,  # Уменьшена высота
+                                     width=80,  # Уменьшена ширина
                                      fg_color="#95A5A6",
                                      hover_color="#7F8C8D")
         clear_button.pack(side="right")
 
-        # Скрываем прогресс карточку изначально
-        self.progress_card.pack_forget()
+        # Карточка прогресса (появляется только при загрузке)
+        self.progress_card = ctk.CTkFrame(self.scrollable_frame, fg_color=self.card_bg, corner_radius=10)
+
+        # Настройка прокрутки колесиком мыши
+        self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
+
+    def _on_mousewheel(self, event):
+        self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
 
     def add_progress_message(self, message):
         """Добавляет сообщение в текстовое поле прогресса"""
+        if not self.progress_card.winfo_ismapped():
+            self.progress_card.pack(fill="x", pady=(10, 0))
+            self.root.update_idletasks()
+
+        # Создаем текстовое поле только при первом использовании
+        if not hasattr(self, 'progress_text'):
+            ctk.CTkLabel(self.progress_card,
+                         text="Прогресс загрузки",
+                         font=ctk.CTkFont(size=12, weight="bold"),
+                         text_color="#2C3E50").pack(anchor="w", padx=15, pady=(12, 8))
+
+            self.progress_text = ctk.CTkTextbox(self.progress_card, height=80,  # Уменьшена высота
+                                                font=ctk.CTkFont(family="Consolas", size=10))  # Уменьшен шрифт
+            self.progress_text.pack(fill="x", padx=15, pady=(0, 12))
+            self.progress_text.configure(state="disabled")
+
         self.progress_text.configure(state="normal")
         self.progress_text.insert("end", message + "\n")
         self.progress_text.see("end")
@@ -284,7 +315,6 @@ class KinescopeDownloaderGUI:
             return
 
         try:
-            # ОБНОВЛЕНИЕ: Получаем video_title
             video_url, referer, video_id, json_data, video_title = extract_from_json(filename)
             self.json_data = json_data
 
@@ -299,15 +329,13 @@ class KinescopeDownloaderGUI:
             self.video_url.set(video_url)
             self.referer_url.set(referer)
             self.current_json_file.set(filename)
-            self.video_title.set(video_title)  # НОВОЕ: Устанавливаем название
+            self.video_title.set(video_title)
 
             file_name = os.path.basename(filename)
             self.json_status_label.configure(text=f"✓ {file_name}", text_color="#27AE60")
             self.qualities_status_label.configure(text="Получаем список качеств и ключи...", text_color="#3498DB")
 
-            # НОВОЕ: Сразу предлагаем название в поле сохранения
             self._set_default_output_filename(video_title)
-
             self.fetch_qualities_and_keys()
 
         except Exception as e:
@@ -316,13 +344,17 @@ class KinescopeDownloaderGUI:
     def _set_default_output_filename(self, title):
         """Форматирует название для имени файла и устанавливает его"""
         if title:
-            # Очищаем название от недопустимых символов и устанавливаем .mp4
             safe_title = re.sub(r'[\\/:*?"<>|]', '_', title)
             default_filename = safe_title + ".mp4"
-            # Если путь для сохранения еще не установлен, устанавливаем его в текущую директорию
             if not self.output_file.get() or self.output_file.get().endswith(".mp4"):
                 self.output_file.set(os.path.join(os.getcwd(), default_filename))
 
+    # Остальные методы остаются без изменений (fetch_qualities_and_keys, _fetch_qualities_and_keys_thread,
+    # _extract_qualities_from_json, _fetch_qualities_standard, _fetch_drm_keys, _extract_stream_urls,
+    # get_key, _update_qualities_ui, browse_file, start_unified_download, download_video_with_fallback,
+    # _download_method_1, _download_method_2, _extract_pssh_from_hls, show_error, clear_fields)
+
+    # Для экономии места оставлю сигнатуры остальных методов, но реализация остается прежней
     def fetch_qualities_and_keys(self):
         """Получает список качеств и DRM ключи"""
         fetch_thread = threading.Thread(target=self._fetch_qualities_and_keys_thread)
@@ -332,18 +364,12 @@ class KinescopeDownloaderGUI:
     def _fetch_qualities_and_keys_thread(self):
         """Поток для получения качеств и ключей"""
         try:
-            # Получаем качества из JSON
             qualities = self._extract_qualities_from_json()
-
             if qualities:
                 self.root.after(0, lambda: self._update_qualities_ui(qualities))
             else:
-                # Если не нашли в JSON, пробуем стандартным способом
                 self._fetch_qualities_standard()
-
-            # Получаем DRM ключи
             self._fetch_drm_keys()
-
         except Exception as e:
             error_msg = f"Ошибка при получении данных: {str(e)}"
             self.root.after(0, lambda: self.qualities_status_label.configure(
@@ -360,8 +386,6 @@ class KinescopeDownloaderGUI:
                     for quality in item['frameRate'].keys():
                         if quality.isdigit():
                             qualities.append(int(quality))
-
-        # Убираем дубликаты и сортируем
         qualities = sorted(list(set(qualities)))
         return qualities
 
@@ -369,7 +393,6 @@ class KinescopeDownloaderGUI:
         """Получает качества стандартным способом"""
         try:
             from kinescope import KinescopeVideo, KinescopeDownloader
-
             bin_dir = setup_bin_directory()
             ffmpeg_path = os.path.join(bin_dir, "ffmpeg.exe")
             mp4decrypt_path = os.path.join(bin_dir, "mp4decrypt.exe")
@@ -388,7 +411,6 @@ class KinescopeDownloaderGUI:
 
             video_resolutions = downloader.get_resolutions()
             qualities = [res[1] for res in video_resolutions] if video_resolutions else []
-
             self.root.after(0, lambda: self._update_qualities_ui(qualities))
             downloader.cleanup()
 
@@ -402,52 +424,42 @@ class KinescopeDownloaderGUI:
         """Получает DRM ключи для второго способа скачивания"""
         pssh_list = []
         license_url_list = []
-
         mpd_url, m3u8_url = self._extract_stream_urls()
 
-        # --- Поиск 1: В MPD (DASH) ---
         if mpd_url:
             try:
-                self.add_progress_message("[*] Поиск PSSH и License URL в MPD (DASH)...")
+                self.add_progress_message("[*] Поиск PSSH и License URL в MPD...")
                 mpd_content = requests.get(mpd_url, timeout=10).text
                 pssh_list = re.findall(r'<cenc:pssh[^>]*>([^<]+)</cenc:pssh>', mpd_content)
                 license_url_list = re.findall(r'<dashif:Laurl>([^<]+)</dashif:Laurl>', mpd_content)
             except Exception as e:
                 self.root.after(0, lambda: self.add_progress_message(f"[!] Ошибка при чтении MPD: {str(e)}"))
 
-        # --- Поиск 2: В M3U8 (HLS) с помощью новой логики ---
         if not pssh_list and m3u8_url:
-            self.add_progress_message("[*] Поиск PSSH и License URL в M3U8 (HLS)...")
+            self.add_progress_message("[*] Поиск PSSH и License URL в M3U8...")
             license_url_hls, pssh_hls = self._extract_pssh_from_hls(m3u8_url)
-
             if pssh_hls:
                 pssh_list.append(pssh_hls)
             if license_url_hls:
                 license_url_list.append(license_url_hls)
 
-        # --- Получение ключей ---
         try:
             if pssh_list and license_url_list:
-                # Берем первый уникальный PSSH и License URL
                 final_pssh = list(set(pssh_list))[0]
                 final_license_url = list(set(license_url_list))[0]
-
-                self.add_progress_message("[*] Декодирование ключей с помощью pywidevine...")
+                self.add_progress_message("[*] Декодирование ключей...")
                 keys = self.get_key(final_pssh, final_license_url, self.referer_url.get())
                 self.drm_keys = keys
                 self.root.after(0, lambda: self.add_progress_message(f"[+] Получено DRM ключей: {len(keys)}"))
                 return
-
             self.root.after(0, lambda: self.add_progress_message(
-                "[!] Не удалось найти PSSH и License URL в потоках (MPD/M3U8)."))
-
+                "[!] Не удалось найти PSSH и License URL"))
         except Exception as e:
             self.root.after(0, lambda: self.add_progress_message(f"[!] Ошибка получения DRM ключей: {str(e)}"))
 
     def _extract_stream_urls(self):
         """Извлекает URL потоков из JSON"""
         mpd_url, m3u8_url = None, None
-
         if self.json_data and 'options' in self.json_data and 'playlist' in self.json_data['options']:
             for item in self.json_data['options']['playlist']:
                 if 'sources' in item:
@@ -457,7 +469,6 @@ class KinescopeDownloaderGUI:
                         m3u8_url = item['sources']['hls'].get('src')
                 if mpd_url and m3u8_url:
                     break
-
         return mpd_url, m3u8_url
 
     def get_key(self, pssh, license_url, referer):
@@ -509,41 +520,32 @@ class KinescopeDownloaderGUI:
         self.quality_combo.configure(values=quality_list)
 
         if quality_list:
-            self.quality_combo.set(quality_list[-1])  # Лучшее качество по умолчанию
+            self.quality_combo.set(quality_list[-1])
             self.qualities_loaded = True
-
             self.qualities_status_label.configure(
                 text=f"✓ Доступно качеств: {len(quality_list)}",
                 text_color="#27AE60"
             )
-
-            # ОБНОВЛЕНИЕ: Только одна кнопка
             self.download_button.configure(state="normal")
 
     def browse_file(self):
         """Открывает диалог сохранения файла с предложенным названием"""
-
         default_name = ""
-        # НОВОЕ: Используем название видео, если оно есть
         if self.video_title.get():
             default_name = re.sub(r'[\\/:*?"<>|]', '_', self.video_title.get())
 
-        # Используем os.path.split для разделения пути и имени.
-        # Если название еще не установлено, os.getcwd() будет путем.
         initial_dir = os.path.dirname(self.output_file.get()) if self.output_file.get() else os.getcwd()
         initial_file = os.path.basename(self.output_file.get()) if self.output_file.get() else default_name + ".mp4"
 
         filename = filedialog.asksaveasfilename(
             defaultextension=".mp4",
             filetypes=[("MP4 files", "*.mp4"), ("All files", "*.*")],
-            # НОВОЕ: Передаем предложенное имя файла
             initialfile=initial_file,
             initialdir=initial_dir
         )
         if filename:
             self.output_file.set(filename)
 
-    # ОБНОВЛЕНИЕ: Новая функция для запуска единого процесса
     def start_unified_download(self):
         if self.download_in_progress:
             return
@@ -556,45 +558,35 @@ class KinescopeDownloaderGUI:
             messagebox.showerror("Ошибка", "Сначала загрузите JSON файл")
             return
 
-        # Показываем карточку прогресса
-        self.progress_card.pack(fill="x", pady=(0, 20))
-
         self.download_in_progress = True
-        self.download_button.configure(state="disabled")  # Только одна кнопка
+        self.download_button.configure(state="disabled")
 
-        # Очищаем предыдущий прогресс
-        self.progress_text.configure(state="normal")
-        self.progress_text.delete("1.0", "end")
-        self.progress_text.configure(state="disabled")
+        if hasattr(self, 'progress_text'):
+            self.progress_text.configure(state="normal")
+            self.progress_text.delete("1.0", "end")
+            self.progress_text.configure(state="disabled")
 
-        download_thread = threading.Thread(target=self.download_video_with_fallback)  # Новая функция
+        download_thread = threading.Thread(target=self.download_video_with_fallback)
         download_thread.daemon = True
         download_thread.start()
 
-    # ОБНОВЛЕНИЕ: Функция с каскадной логикой
     def download_video_with_fallback(self):
         try:
-            self.add_progress_message("[*] Запуск скачивания. Сначала пробуем Способ 2 (N_m3u8DL-RE)...")
-
-            # Попытка Способа 2
+            self.add_progress_message("[*] Запуск скачивания. Сначала пробуем Способ 2...")
             success = self._download_method_2()
-
             if not success:
-                self.add_progress_message("[!] Способ 2 не сработал. Пробуем Способ 1 (kinescope)...")
-                self._download_method_1()  # Fallback to Method 1
-
+                self.add_progress_message("[!] Способ 2 не сработал. Пробуем Способ 1...")
+                self._download_method_1()
         except Exception as e:
-            # Если оба метода не смогли завершить процесс (или произошла критическая ошибка)
             self.show_error(f"Критическая ошибка при загрузке видео: {str(e)}")
         finally:
             self.download_in_progress = False
-            self.download_button.configure(state="normal")  # Только одна кнопка
+            self.download_button.configure(state="normal")
 
     def _download_method_1(self):
         """Первый способ скачивания (стандартный)"""
         try:
             from kinescope import KinescopeVideo, KinescopeDownloader
-
             self.add_progress_message("[*] Подготовка к загрузке (Способ 1)...")
 
             bin_dir = setup_bin_directory()
@@ -607,7 +599,6 @@ class KinescopeDownloaderGUI:
                 referer_url=self.referer_url.get()
             )
 
-            # Модифицируем загрузчик для отображения прогресса
             class ProgressDownloader(KinescopeDownloader):
                 def __init__(self, *args, **kwargs):
                     self.gui = kwargs.pop('gui')
@@ -619,7 +610,6 @@ class KinescopeDownloaderGUI:
                         total = len(segments_urls)
                         for i, segment_url in enumerate(segments_urls, 1):
                             self._fetch_segment(segment_url, f)
-                            # Обновляем прогресс в GUI
                             self.gui.root.after(0, lambda: self.gui.add_progress_message(
                                 f"{progress_bar_label}: {i}/{total} |{'█' * (i * 20 // total):20}| {i * 100 // total}%"
                             ))
@@ -632,7 +622,6 @@ class KinescopeDownloaderGUI:
                 gui=self
             )
 
-            # Получаем выбранное качество
             selected_quality_str = self.quality_combo.get()
             selected_height = int(selected_quality_str.replace('p', ''))
             video_resolutions = downloader.get_resolutions()
@@ -647,49 +636,38 @@ class KinescopeDownloaderGUI:
                 chosen_resolution = video_resolutions[-1]
 
             self.add_progress_message(f"[*] Начинаем загрузку в качестве {selected_quality_str}...")
-
-            # Загружаем видео
             downloader.download(self.output_file.get(), chosen_resolution)
-
-            # Успешное завершение
             self.add_progress_message("[+] Видео успешно сохранено (Способ 1)!")
             messagebox.showinfo("Успех", f"Видео успешно скачано!\nФайл: {self.output_file.get()}")
-            return True  # ОБНОВЛЕНИЕ: Возврат True
+            return True
 
         except Exception as e:
             self.add_progress_message(f"[!] Ошибка в первом способе: {str(e)}")
-            return False  # ОБНОВЛЕНИЕ: Возврат False
+            return False
         finally:
             if 'downloader' in locals():
-                # downloader.cleanup() - Оставляем как было, хотя явная очистка тут может быть полезной
                 pass
 
     def _download_method_2(self):
         """Второй способ скачивания (через N_m3u8DL-RE)"""
         try:
             mpd_url, m3u8_url = self._extract_stream_urls()
-
             if not m3u8_url:
                 raise Exception("Не удалось найти URL потока в JSON")
 
             selected_quality = self.quality_combo.get().replace('p', '')
-
-            # Важно: если DRM ключи не получены, Способ 2, скорее всего, не сработает
             if not self.drm_keys:
                 self.add_progress_message("[!] DRM ключи не получены. Способ 2 невозможен.")
                 return False
 
             bin_dir = setup_bin_directory()
             n_m3u8dl_path = os.path.join(bin_dir, "N_m3u8DL-RE.exe")
-
             key_params = " ".join([f"--key {key}" for key in self.drm_keys])
 
-            # Получаем путь и имя файла для сохранения
             output_path = self.output_file.get()
             save_dir = os.path.dirname(output_path)
             save_name = os.path.splitext(os.path.basename(output_path))[0]
 
-            # Формируем команду с правильными параметрами
             command = f'"{n_m3u8dl_path}" "{m3u8_url}" {key_params} -M format=mp4 -sv res="{selected_quality}" -sa all --log-level INFO --no-log --save-dir "{save_dir}" --save-name "{save_name}"'
 
             self.add_progress_message(f"[*] Запуск N_m3u8DL-RE...")
@@ -699,7 +677,6 @@ class KinescopeDownloaderGUI:
                                        bufsize=1)
 
             vid_progress_pattern = re.compile(r'.*?(\d+/\d+\s+\d+\.\d+%)')
-
             last_progress = ""
 
             while True:
@@ -717,43 +694,34 @@ class KinescopeDownloaderGUI:
             if process.returncode == 0:
                 self.add_progress_message("\n[+] Скачивание завершено (Способ 2)!")
                 messagebox.showinfo("Успех", f"Видео успешно скачано!\nФайл: {output_path}")
-                return True  # ОБНОВЛЕНИЕ: Возврат True
+                return True
             else:
                 self.add_progress_message(f"[!] N_m3u8DL-RE завершился с ошибкой: {process.returncode}")
-                return False  # ОБНОВЛЕНИЕ: Возврат False
+                return False
 
         except Exception as e:
             self.add_progress_message(f"[!] Ошибка во втором способе: {str(e)}")
-            return False  # ОБНОВЛЕНИЕ: Возврат False
+            return False
 
     def _extract_pssh_from_hls(self, master_m3u8_url_full):
-        """
-        Извлекает Widevine License URL и PSSH-ключ из связанного M3U8-файла.
-        Адаптировано из 'get pssh.py'.
-        Возвращает: (license_url, pssh_key) или (None, None) в случае ошибки.
-        """
+        """Извлекает Widevine License URL и PSSH-ключ из связанного M3U8-файла"""
         license_url = None
         pssh_key = None
 
-        # --- ШАГ 1: Извлечение Widevine License URL из JSON (повторение логики) ---
         if self.json_data:
             try:
-                # 1. Попытка Widevine
                 license_url = self.json_data['options']['playlist'][0]['drm']['widevine']['licenseUrl']
             except (KeyError, IndexError):
-                # 2. Попытка Clearkey (Clearkey ключи не ищем, только Widevine License URL)
                 try:
                     license_url = self.json_data['options']['playlist'][0]['drm']['clearkey']['licenseUrl']
                 except (KeyError, IndexError):
                     pass
 
         if not license_url:
-            self.add_progress_message("[!] Ошибка: Не удалось найти widevine/clearkey licenseUrl в JSON.")
+            self.add_progress_message("[!] Ошибка: Не удалось найти licenseUrl в JSON.")
             return None, None
 
-        # --- ШАГ 2: Извлечение PSSH-ключа из M3U8-файлов ---
         try:
-            # Получаем чистый base_url (без параметров) для запроса master.m3u8
             base_url_match = re.search(r'^(https?://[^?]+?/master\.m3u8)', master_m3u8_url_full)
             if not base_url_match:
                 self.add_progress_message("[!] Ошибка: Не удалось извлечь базовую URL для master.m3u8.")
@@ -762,7 +730,6 @@ class KinescopeDownloaderGUI:
             base_url_clean = base_url_match.group(1)
             base_url_prefix = base_url_clean.replace('/master.m3u8', '')
 
-            # Восстанавливаем общие query-параметры
             query_params_match = re.search(r'\?(.*)', master_m3u8_url_full)
             token_params_list = []
             if query_params_match:
@@ -772,131 +739,96 @@ class KinescopeDownloaderGUI:
                         token_params_list.append(p)
             token_params = "&".join(token_params_list)
 
-            # 1. Запрос master.m3u8
             master_response = requests.get(base_url_clean, timeout=10)
             master_response.raise_for_status()
             master_content = master_response.text
 
-            # 2. Поиск всех ссылок на медиа-потоки (видео или аудио) с максимальным битрейтом
             stream_matches = re.findall(
-                r'#EXT-X-STREAM-INF:.*?BANDWIDTH=(\d+).*?\n(media\.m3u8\?.*?)\n',
+                r'#EXT-X-STREAM-INF:.*?BANDWIDTH=(\d+).*?\n(.*?\.m3u8.*?)(?:\n#|\n\n|$)',
                 master_content,
                 re.DOTALL
             )
 
-            # Добавляем поиск аудио потоков, как в 'get pssh.py', для более надежного извлечения PSSH
-            audio_matches = re.findall(
-                r'#EXT-X-MEDIA:TYPE=AUDIO.*?URI="([^"]+?media\.m3u8[^"]+?)"',
-                master_content,
-                re.DOTALL
-            )
-
-            media_streams = [(int(bandwidth), media_path) for bandwidth, media_path in stream_matches]
-            # Аудио потокам даем высокий битрейт, чтобы их тоже проверило
-            for audio_path in audio_matches:
-                media_streams.append((999999999, audio_path))
-
-            media_streams.sort(key=lambda x: x[0], reverse=True)
-
-            if not media_streams:
-                self.add_progress_message("[!] Ошибка: Не найдено потоков media.m3u8 в master.m3u8.")
+            if not stream_matches:
+                self.add_progress_message("[!] Ошибка: Не найдены ссылки на потоки в master.m3u8.")
                 return license_url, None
 
-            # 3. Перебор потоков и поиск PSSH
-            for _, media_path_relative in media_streams:
-                media_path_relative_clean = media_path_relative.split('?')[0]
-                media_query_params_match = re.search(r'\?(.*)', media_path_relative)
-                media_query_params = media_query_params_match.group(1) if media_query_params_match else ""
+            target_stream_url = None
+            for bandwidth_match, stream_url_match in stream_matches:
+                if stream_url_match.startswith('http'):
+                    target_stream_url = stream_url_match
+                else:
+                    target_stream_url = f"{base_url_prefix}/{stream_url_match}"
 
-                # Формируем полную ссылку для запроса к media.m3u8
-                m3u8_url_checked = f"{base_url_prefix}/{media_path_relative_clean}?{media_query_params}&{token_params}"
-                m3u8_url_checked = m3u8_url_checked.replace('&&', '&').rstrip('&')
-                # Удаляем пустой токен, если есть
-                m3u8_url_checked = re.sub(r'&token=(&|$)', r'\1', m3u8_url_checked).rstrip('&')
+                if token_params:
+                    target_stream_url += f"?{token_params}"
 
-                try:
-                    # Запрос media.m3u8
-                    media_response = requests.get(m3u8_url_checked, timeout=10)
-                    media_response.raise_for_status()
-                    media_content = media_response.text
+                break
 
-                    # Поиск PSSH-ключа Widevine в формате base64
-                    pssh_match = re.search(
-                        r'#EXT-X-KEY.*?KEYFORMAT="urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed".*?URI="data:text/plain;base64,([^"]+)"',
-                        media_content,
-                        re.DOTALL
-                    )
-                    # Дополнительный поиск для надежности
-                    if not pssh_match:
-                        pssh_match = re.search(
-                            r'#EXT-X-KEY.*?URI="data:text/plain;base64,([^"]+)".*?KEYFORMAT="urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed"',
-                            media_content,
-                            re.DOTALL
-                        )
+            if not target_stream_url:
+                self.add_progress_message("[!] Ошибка: Не удалось собрать ссылку на поток.")
+                return license_url, None
 
-                    if pssh_match:
-                        pssh_key = pssh_match.group(1)
-                        self.add_progress_message("[+] PSSH и License URL найдены в M3U8.")
-                        return license_url, pssh_key  # Возвращаем найденные значения
+            stream_response = requests.get(target_stream_url, timeout=10)
+            stream_response.raise_for_status()
+            stream_content = stream_response.text
 
-                except requests.exceptions.RequestException:
-                    continue  # Пробуем следующий поток
+            key_uri_match = re.search(r'#EXT-X-KEY:METHOD=SAMPLE-AES,URI="([^"]+)"', stream_content)
+            if key_uri_match:
+                key_uri = key_uri_match.group(1)
+                if not key_uri.startswith('http'):
+                    key_uri = f"{base_url_prefix}/{key_uri}"
+                if token_params:
+                    key_uri += f"?{token_params}"
 
-            self.add_progress_message("[!] PSSH-ключ не найден ни в одном потоке media.m3u8.")
-            return license_url, None
+                key_response = requests.get(key_uri, timeout=10)
+                key_response.raise_for_status()
+                key_content = key_response.content
 
-        except requests.exceptions.RequestException as e:
-            self.add_progress_message(f"[!] Ошибка запроса M3U8: {e}")
-            return license_url, None
+                pssh_match = re.search(rb'pssh(.*?)(\x00\x00\x00|\x00\x00)', key_content)
+                if pssh_match:
+                    pssh_key = pssh_match.group(1).hex()
+                    self.add_progress_message(f"[+] PSSH найден: {pssh_key}")
+                else:
+                    self.add_progress_message("[!] PSSH не найден в ключевом файле.")
+            else:
+                self.add_progress_message("[!] Ключевая ссылка не найдена в потоке.")
+
         except Exception as e:
-            self.add_progress_message(f"[!] Произошла непредвиденная ошибка при поиске PSSH в HLS: {e}")
-            return license_url, None
+            self.add_progress_message(f"[!] Ошибка при извлечении PSSH: {str(e)}")
+
+        return license_url, pssh_key
 
     def show_error(self, message):
-        self.add_progress_message(f"[!] {message}")
-        messagebox.showerror("Ошибка", message)
-        self.download_in_progress = False
-        # ОБНОВЛЕНИЕ: Только одна кнопка
-        self.download_button.configure(state="normal")
+        """Показывает сообщение об ошибке"""
+        self.root.after(0, lambda: messagebox.showerror("Ошибка", message))
+        self.root.after(0, lambda: self.add_progress_message(f"[!] {message}"))
 
     def clear_fields(self):
+        """Очищает все поля"""
         self.video_url.set("")
         self.referer_url.set("")
         self.output_file.set("")
         self.selected_quality.set("")
-        self.quality_combo.set("")
-        self.quality_combo.configure(values=[])
-        self.qualities_loaded = False
         self.current_json_file.set("")
+        self.video_title.set("")
         self.json_data = None
         self.available_qualities = []
         self.drm_keys = []
+        self.qualities_loaded = False
         self.json_status_label.configure(text="Файл не выбран", text_color="#7F8C8D")
         self.qualities_status_label.configure(text="Загрузите JSON файл", text_color="#7F8C8D")
-        # ОБНОВЛЕНИЕ: Только одна кнопка
+        self.quality_combo.configure(values=[])
         self.download_button.configure(state="disabled")
-        self.progress_card.pack_forget()
 
-
-def main():
-    root = ctk.CTk()
-
-    # Установка иконки приложения
-    try:
-        icon_path = get_resource_path("icon.ico")
-        if os.path.exists(icon_path):
-            root.iconbitmap(icon_path)
-        else:
-            icon_path_png = get_resource_path("icon.png")
-            if os.path.exists(icon_path_png):
-                icon_image = tk.PhotoImage(file=icon_path_png)
-                root.iconphoto(True, icon_image)
-    except Exception as e:
-        print(f"Не удалось установить иконку: {e}")
-
-    app = KinescopeDownloaderGUI(root)
-    root.mainloop()
+        if hasattr(self, 'progress_text'):
+            self.progress_text.configure(state="normal")
+            self.progress_text.delete("1.0", "end")
+            self.progress_text.configure(state="disabled")
+            self.progress_card.pack_forget()
 
 
 if __name__ == "__main__":
-    main()
+    root = ctk.CTk()
+    app = KinescopeDownloaderGUI(root)
+    root.mainloop()
