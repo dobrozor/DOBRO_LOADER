@@ -71,7 +71,17 @@ def extract_from_json(json_filepath):
         video_url = data.get('url', '')
         referer = data.get('referrer', '')
         video_id = data.get('meta', {}).get('videoId', '')
-        video_title = data.get('meta', {}).get('title', '')
+
+        # *** ИСПРАВЛЕНИЕ: Ищем title по правильному пути: options -> playlist -> [0] -> title ***
+        video_title = ''
+        if data.get('options') and isinstance(data['options'].get('playlist'), list) and len(
+                data['options']['playlist']) > 0:
+            # Пытаемся взять title из первого элемента плейлиста
+            video_title = data['options']['playlist'][0].get('title', '')
+
+        # Если не нашли там, пробуем старый путь (хотя он, вероятно, неверный для этого типа JSON)
+        if not video_title:
+            video_title = data.get('meta', {}).get('title', '')
 
         return video_url, referer, video_id, data, video_title
 
@@ -322,37 +332,45 @@ class KinescopeDownloaderGUI:
                 messagebox.showerror("Ошибка", "Не удалось найти URL в JSON файле")
                 return
 
-            if not referer:
-                messagebox.showerror("Ошибка", "Не удалось найти Referer в JSON файле")
-                return
-
             self.video_url.set(video_url)
             self.referer_url.set(referer)
             self.current_json_file.set(filename)
             self.video_title.set(video_title)
 
+            # 2. Получаем директорию, где лежит JSON-файл
+            json_dir = os.path.dirname(filename)
+            print(f"[LOG] load_json_file: JSON File Dir: {json_dir}")  # <-- ЛОГИРОВАНИЕ
+
             file_name = os.path.basename(filename)
             self.json_status_label.configure(text=f"✓ {file_name}", text_color="#27AE60")
             self.qualities_status_label.configure(text="Получаем список качеств и ключи...", text_color="#3498DB")
 
-            self._set_default_output_filename(video_title)
+            # 3. Передаем эту директорию в функцию установки имени файла
+            self._set_default_output_filename(video_title, json_dir)
             self.fetch_qualities_and_keys()
 
         except Exception as e:
             messagebox.showerror("Ошибка", f"Ошибка при загрузке JSON файла:\n{str(e)}")
 
-    def _set_default_output_filename(self, title):
-        """Форматирует название для имени файла и устанавливает его"""
-        if title:
-            safe_title = re.sub(r'[\\/:*?"<>|]', '_', title)
-            default_filename = safe_title + ".mp4"
-            if not self.output_file.get() or self.output_file.get().endswith(".mp4"):
-                self.output_file.set(os.path.join(os.getcwd(), default_filename))
+    def _set_default_output_filename(self, title, save_dir=None):
+        """Форматирует название для имени файла и устанавливает его в папку JSON."""
+        print(f"[LOG] _set_default_output_filename: Received title='{title}', save_dir='{save_dir}'")  # Оставляем лог
 
-    # Остальные методы остаются без изменений (fetch_qualities_and_keys, _fetch_qualities_and_keys_thread,
-    # _extract_qualities_from_json, _fetch_qualities_standard, _fetch_drm_keys, _extract_stream_urls,
-    # get_key, _update_qualities_ui, browse_file, start_unified_download, download_video_with_fallback,
-    # _download_method_1, _download_method_2, _extract_pssh_from_hls, show_error, clear_fields)
+        # Определяем название: если title пустой, используем 'video_download'
+        effective_title = title if title else "video_download"
+
+        # 1. Форматируем безопасное имя
+        safe_title = re.sub(r'[\\/:*?"<>|]', '_', effective_title)
+        default_filename = safe_title + ".mp4"
+
+        # 2. Определяем конечную директорию (папка JSON или текущая)
+        final_dir = save_dir if save_dir else os.getcwd()
+
+        # 3. ВСЕГДА устанавливаем полный путь по умолчанию
+        full_path = os.path.join(final_dir, default_filename)
+        self.output_file.set(full_path)
+
+        print(f"[LOG] _set_default_output_filename: Set Output Path: {full_path}")  # Оставляем лог
 
     # Для экономии места оставлю сигнатуры остальных методов, но реализация остается прежней
     def fetch_qualities_and_keys(self):
@@ -530,12 +548,28 @@ class KinescopeDownloaderGUI:
 
     def browse_file(self):
         """Открывает диалог сохранения файла с предложенным названием"""
-        default_name = ""
-        if self.video_title.get():
-            default_name = re.sub(r'[\\/:*?"<>|]', '_', self.video_title.get())
 
-        initial_dir = os.path.dirname(self.output_file.get()) if self.output_file.get() else os.getcwd()
-        initial_file = os.path.basename(self.output_file.get()) if self.output_file.get() else default_name + ".mp4"
+        current_full_path = self.output_file.get()
+        print(f"[LOG] browse_file: Current Output Path: {current_full_path}")
+
+        # 1. Определяем начальную директорию
+        initial_dir = os.getcwd()
+        if current_full_path:
+            dir_from_path = os.path.dirname(current_full_path)
+            # Проверяем, существует ли директория, чтобы избежать сброса Tkinter'ом
+            if os.path.exists(dir_from_path) and os.path.isdir(dir_from_path):
+                initial_dir = dir_from_path
+
+        # 2. Определяем начальное имя файла
+        initial_file = ""
+        if current_full_path and not os.path.isdir(current_full_path):
+            initial_file = os.path.basename(current_full_path)
+        elif self.video_title.get():
+            safe_name = re.sub(r'[\\/:*?"<>|]', '_', self.video_title.get())
+            initial_file = safe_name + ".mp4"
+
+        print(f"[LOG] browse_file: Initial Dir: {initial_dir}")
+        print(f"[LOG] browse_file: Initial File: {initial_file}")
 
         filename = filedialog.asksaveasfilename(
             defaultextension=".mp4",
@@ -545,6 +579,7 @@ class KinescopeDownloaderGUI:
         )
         if filename:
             self.output_file.set(filename)
+            print(f"[LOG] browse_file: New selected path: {filename}")
 
     def start_unified_download(self):
         if self.download_in_progress:
@@ -636,7 +671,19 @@ class KinescopeDownloaderGUI:
                 chosen_resolution = video_resolutions[-1]
 
             self.add_progress_message(f"[*] Начинаем загрузку в качестве {selected_quality_str}...")
+
+            # Получаем URL сегментов для проверки наличия аудио
+            segments_urls = downloader._get_segments_urls(chosen_resolution)
+            has_audio = 'audio/mp4' in segments_urls
+
+            if has_audio:
+                self.add_progress_message("[*] Обнаружена аудио дорожка")
+            else:
+                self.add_progress_message("[!] Аудио дорожка не обнаружена - будет скачано только видео")
+
+            # Скачиваем с учетом наличия/отсутствия аудио
             downloader.download(self.output_file.get(), chosen_resolution)
+
             self.add_progress_message("[+] Видео успешно сохранено (Способ 1)!")
             messagebox.showinfo("Успех", f"Видео успешно скачано!\nФайл: {self.output_file.get()}")
             return True
