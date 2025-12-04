@@ -9,12 +9,6 @@
   Так же если мне не доверяете, то файл mp4decrypt можете удалить и вставить свой, скачав с официального сайта _https://www.bok.net/Bento4/binaries/Bento4-SDK-1-6-0-641.x86_64-microsoft-win32.zip_ архив, так же в папке bin наш файл **mp4decrypt.exe**
   А так же если доверия так же нет, файл N_m3u8DL-RE можно скачать официально отсюда https://github.com/nilaoda/N_m3u8DL-RE
 
-### Окончательный вид проекта
-Если вы сами всё хотите скомпилировать у вас всё должно выгялдеть так
-
-<img width="452" height="417" alt="image" src="https://github.com/user-attachments/assets/d37f164d-3af6-4b8d-ad35-4655ecc4b14f" />
-
-
 Главный файл естетсвенно main.py
 
 ## Для вопросов
