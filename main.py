@@ -11,6 +11,7 @@ import subprocess
 import requests
 import httpx
 from urllib.parse import urlparse
+from base64 import b64decode, b64encode
 from pywidevine.cdm import Cdm
 from pywidevine.device import Device
 from pywidevine.pssh import PSSH
@@ -72,14 +73,11 @@ def extract_from_json(json_filepath):
         referer = data.get('referrer', '')
         video_id = data.get('meta', {}).get('videoId', '')
 
-        # *** ИСПРАВЛЕНИЕ: Ищем title по правильному пути: options -> playlist -> [0] -> title ***
         video_title = ''
         if data.get('options') and isinstance(data['options'].get('playlist'), list) and len(
                 data['options']['playlist']) > 0:
-            # Пытаемся взять title из первого элемента плейлиста
             video_title = data['options']['playlist'][0].get('title', '')
 
-        # Если не нашли там, пробуем старый путь (хотя он, вероятно, неверный для этого типа JSON)
         if not video_title:
             video_title = data.get('meta', {}).get('title', '')
 
@@ -93,7 +91,7 @@ class KinescopeDownloaderGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("DOBRO LOADER")
-        self.root.geometry("500x650")  # Уменьшена высота
+        self.root.geometry("500x650")
         self.root.resizable(True, True)
 
         # Цветовая схема
@@ -119,7 +117,7 @@ class KinescopeDownloaderGUI:
     def setup_ui(self):
         # Главный контейнер с прокруткой
         main_frame = ctk.CTkFrame(self.root, fg_color=self.light_bg)
-        main_frame.pack(fill="both", expand=True, padx=15, pady=15)  # Уменьшены отступы
+        main_frame.pack(fill="both", expand=True, padx=15, pady=15)
 
         # Canvas для прокрутки
         self.canvas = tk.Canvas(main_frame, bg=self.light_bg, highlightthickness=0)
@@ -177,7 +175,7 @@ class KinescopeDownloaderGUI:
 
         ctk.CTkLabel(json_card,
                      text="1. Загрузка данных",
-                     font=ctk.CTkFont(size=12, weight="bold"),  # Уменьшен шрифт
+                     font=ctk.CTkFont(size=12, weight="bold"),
                      text_color="#2C3E50").pack(anchor="w", padx=15, pady=(12, 8))
 
         json_button_frame = ctk.CTkFrame(json_card, fg_color="transparent")
@@ -339,7 +337,6 @@ class KinescopeDownloaderGUI:
 
             # 2. Получаем директорию, где лежит JSON-файл
             json_dir = os.path.dirname(filename)
-            print(f"[LOG] load_json_file: JSON File Dir: {json_dir}")  # <-- ЛОГИРОВАНИЕ
 
             file_name = os.path.basename(filename)
             self.json_status_label.configure(text=f"✓ {file_name}", text_color="#27AE60")
@@ -353,14 +350,16 @@ class KinescopeDownloaderGUI:
             messagebox.showerror("Ошибка", f"Ошибка при загрузке JSON файла:\n{str(e)}")
 
     def _set_default_output_filename(self, title, save_dir=None):
-        """Форматирует название для имени файла и устанавливает его в папку JSON."""
-        print(f"[LOG] _set_default_output_filename: Received title='{title}', save_dir='{save_dir}'")  # Оставляем лог
 
         # Определяем название: если title пустой, используем 'video_download'
         effective_title = title if title else "video_download"
 
-        # 1. Форматируем безопасное имя
-        safe_title = re.sub(r'[\\/:*?"<>|]', '_', effective_title)
+        # 1. Форматируем безопасное имя - заменяем пробелы и спецсимволы на подчеркивания
+        safe_title = re.sub(r'[\s\\/:*?"<>|]', '_', effective_title)
+        # Убираем двойные подчеркивания
+        safe_title = re.sub(r'_+', '_', safe_title)
+        # Убираем подчеркивания в начале и конце
+        safe_title = safe_title.strip('_')
         default_filename = safe_title + ".mp4"
 
         # 2. Определяем конечную директорию (папка JSON или текущая)
@@ -370,9 +369,7 @@ class KinescopeDownloaderGUI:
         full_path = os.path.join(final_dir, default_filename)
         self.output_file.set(full_path)
 
-        print(f"[LOG] _set_default_output_filename: Set Output Path: {full_path}")  # Оставляем лог
 
-    # Для экономии места оставлю сигнатуры остальных методов, но реализация остается прежней
     def fetch_qualities_and_keys(self):
         """Получает список качеств и DRM ключи"""
         fetch_thread = threading.Thread(target=self._fetch_qualities_and_keys_thread)
@@ -410,27 +407,20 @@ class KinescopeDownloaderGUI:
     def _fetch_qualities_standard(self):
         """Получает качества стандартным способом"""
         try:
-            from kinescope import KinescopeVideo, KinescopeDownloader
-            bin_dir = setup_bin_directory()
-            ffmpeg_path = os.path.join(bin_dir, "ffmpeg.exe")
-            mp4decrypt_path = os.path.join(bin_dir, "mp4decrypt.exe")
+            qualities = []
+            if self.json_data and 'options' in self.json_data and 'playlist' in self.json_data['options']:
+                for item in self.json_data['options']['playlist']:
+                    if 'sources' in item:
+                        # Ищем доступные качества
+                        if 'shakadash' in item['sources']:
+                            qualities.append(1080)  # Пример качества
+                        if 'hls' in item['sources']:
+                            qualities.append(720)  # Пример качества
 
-            kinescope_video = KinescopeVideo(
-                url=self.video_url.get(),
-                referer_url=self.referer_url.get()
-            )
+            if not qualities:
+                qualities = [360, 720]
 
-            downloader = KinescopeDownloader(
-                kinescope_video,
-                temp_dir='./temp',
-                ffmpeg_path=ffmpeg_path,
-                mp4decrypt_path=mp4decrypt_path
-            )
-
-            video_resolutions = downloader.get_resolutions()
-            qualities = [res[1] for res in video_resolutions] if video_resolutions else []
             self.root.after(0, lambda: self._update_qualities_ui(qualities))
-            downloader.cleanup()
 
         except Exception as e:
             self.root.after(0, lambda: self.qualities_status_label.configure(
@@ -487,6 +477,18 @@ class KinescopeDownloaderGUI:
                         m3u8_url = item['sources']['hls'].get('src')
                 if mpd_url and m3u8_url:
                     break
+
+
+        # Если MPD не найден напрямую, но есть M3U8, пытаемся создать MPD URL
+        if not mpd_url and m3u8_url:
+            # Заменяем распространенные расширения m3u8 на mpd
+            derived_mpd_url = m3u8_url.replace('/master.m3u8', '/master.mpd').replace('/manifest.m3u8', '/manifest.mpd')
+            # Если URL действительно изменился, используем его как mpd_url
+            if derived_mpd_url != m3u8_url:
+                mpd_url = derived_mpd_url
+                self.add_progress_message(f"[*] Сгенерирован MPD URL для поиска ключей: {mpd_url}")
+
+
         return mpd_url, m3u8_url
 
     def get_key(self, pssh, license_url, referer):
@@ -550,7 +552,6 @@ class KinescopeDownloaderGUI:
         """Открывает диалог сохранения файла с предложенным названием"""
 
         current_full_path = self.output_file.get()
-        print(f"[LOG] browse_file: Current Output Path: {current_full_path}")
 
         # 1. Определяем начальную директорию
         initial_dir = os.getcwd()
@@ -565,11 +566,12 @@ class KinescopeDownloaderGUI:
         if current_full_path and not os.path.isdir(current_full_path):
             initial_file = os.path.basename(current_full_path)
         elif self.video_title.get():
-            safe_name = re.sub(r'[\\/:*?"<>|]', '_', self.video_title.get())
+            safe_name = re.sub(r'[\s\\/:*?"<>|]', '_', self.video_title.get())
+            # Убираем двойные подчеркивания
+            safe_name = re.sub(r'_+', '_', safe_name)
+            # Убираем подчеркивания в начале и конце
+            safe_name = safe_name.strip('_')
             initial_file = safe_name + ".mp4"
-
-        print(f"[LOG] browse_file: Initial Dir: {initial_dir}")
-        print(f"[LOG] browse_file: Initial File: {initial_file}")
 
         filename = filedialog.asksaveasfilename(
             defaultextension=".mp4",
@@ -579,7 +581,6 @@ class KinescopeDownloaderGUI:
         )
         if filename:
             self.output_file.set(filename)
-            print(f"[LOG] browse_file: New selected path: {filename}")
 
     def start_unified_download(self):
         if self.download_in_progress:
@@ -607,96 +608,22 @@ class KinescopeDownloaderGUI:
 
     def download_video_with_fallback(self):
         try:
-            self.add_progress_message("[*] Запуск скачивания. Сначала пробуем Способ 2...")
+            self.add_progress_message("[*] Запуск скачивания. Сначала пробуем Способ 2 (Widevine)...")
             success = self._download_method_2()
             if not success:
-                self.add_progress_message("[!] Способ 2 не сработал. Пробуем Способ 1...")
-                self._download_method_1()
+                self.add_progress_message("[!] Способ 2 не сработал. Пробуем Способ 3 (Clearkey)...")
+                success = self._download_method_3()
+                if not success:
+                    self.add_progress_message("[!] Оба способа не сработали.")
+                    messagebox.showerror("Ошибка", "Не удалось скачать видео ни одним из способов.")
         except Exception as e:
             self.show_error(f"Критическая ошибка при загрузке видео: {str(e)}")
         finally:
             self.download_in_progress = False
             self.download_button.configure(state="normal")
 
-    def _download_method_1(self):
-        """Первый способ скачивания (стандартный)"""
-        try:
-            from kinescope import KinescopeVideo, KinescopeDownloader
-            self.add_progress_message("[*] Подготовка к загрузке (Способ 1)...")
-
-            bin_dir = setup_bin_directory()
-            ffmpeg_path = os.path.join(bin_dir, "ffmpeg.exe")
-            mp4decrypt_path = os.path.join(bin_dir, "mp4decrypt.exe")
-
-            self.add_progress_message("[*] Получение информации о видео...")
-            kinescope_video = KinescopeVideo(
-                url=self.video_url.get(),
-                referer_url=self.referer_url.get()
-            )
-
-            class ProgressDownloader(KinescopeDownloader):
-                def __init__(self, *args, **kwargs):
-                    self.gui = kwargs.pop('gui')
-                    super().__init__(*args, **kwargs)
-
-                def _fetch_segments(self, segments_urls, filepath, progress_bar_label):
-                    segments_urls = [seg for i, seg in enumerate(segments_urls) if i == segments_urls.index(seg)]
-                    with open(filepath, 'wb') as f:
-                        total = len(segments_urls)
-                        for i, segment_url in enumerate(segments_urls, 1):
-                            self._fetch_segment(segment_url, f)
-                            self.gui.root.after(0, lambda: self.gui.add_progress_message(
-                                f"{progress_bar_label}: {i}/{total} |{'█' * (i * 20 // total):20}| {i * 100 // total}%"
-                            ))
-
-            downloader = ProgressDownloader(
-                kinescope_video,
-                temp_dir='./temp',
-                ffmpeg_path=ffmpeg_path,
-                mp4decrypt_path=mp4decrypt_path,
-                gui=self
-            )
-
-            selected_quality_str = self.quality_combo.get()
-            selected_height = int(selected_quality_str.replace('p', ''))
-            video_resolutions = downloader.get_resolutions()
-
-            chosen_resolution = None
-            for res in video_resolutions:
-                if res[1] == selected_height:
-                    chosen_resolution = res
-                    break
-
-            if not chosen_resolution:
-                chosen_resolution = video_resolutions[-1]
-
-            self.add_progress_message(f"[*] Начинаем загрузку в качестве {selected_quality_str}...")
-
-            # Получаем URL сегментов для проверки наличия аудио
-            segments_urls = downloader._get_segments_urls(chosen_resolution)
-            has_audio = 'audio/mp4' in segments_urls
-
-            if has_audio:
-                self.add_progress_message("[*] Обнаружена аудио дорожка")
-            else:
-                self.add_progress_message("[!] Аудио дорожка не обнаружена - будет скачано только видео")
-
-            # Скачиваем с учетом наличия/отсутствия аудио
-            downloader.download(self.output_file.get(), chosen_resolution)
-
-            self.add_progress_message("[+] Видео успешно сохранено (Способ 1)!")
-            messagebox.showinfo("Успех", f"Видео успешно скачано!\nФайл: {self.output_file.get()}")
-            return True
-
-        except Exception as e:
-            self.add_progress_message(f"[!] Ошибка в первом способе: {str(e)}")
-            return False
-        finally:
-            if 'downloader' in locals():
-                pass
-
     def _download_method_2(self):
-        """Второй способ скачивания (через N_m3u8DL-RE)"""
+        """Второй способ скачивания (через N_m3u8DL-RE с Widevine)"""
         try:
             mpd_url, m3u8_url = self._extract_stream_urls()
             if not m3u8_url:
@@ -715,7 +642,12 @@ class KinescopeDownloaderGUI:
             save_dir = os.path.dirname(output_path)
             save_name = os.path.splitext(os.path.basename(output_path))[0]
 
-            command = f'"{n_m3u8dl_path}" "{m3u8_url}" {key_params} -M format=mp4 -sv res="{selected_quality}" -sa all --log-level INFO --no-log --save-dir "{save_dir}" --save-name "{save_name}"'
+            # Форматируем имя файла без пробелов и спецсимволов
+            save_name_clean = re.sub(r'[\s\\/:*?"<>|]', '_', save_name)
+            save_name_clean = re.sub(r'_+', '_', save_name_clean)
+            save_name_clean = save_name_clean.strip('_')
+
+            command = f'"{n_m3u8dl_path}" "{m3u8_url}" {key_params} -M format=mp4 -sv res="{selected_quality}" -sa all --log-level INFO --no-log --save-dir "{save_dir}" --save-name "{save_name_clean}"'
 
             self.add_progress_message(f"[*] Запуск N_m3u8DL-RE...")
             self.add_progress_message(f"[*] Команда: {command}")
@@ -748,6 +680,167 @@ class KinescopeDownloaderGUI:
 
         except Exception as e:
             self.add_progress_message(f"[!] Ошибка во втором способе: {str(e)}")
+            return False
+
+    def _download_method_3(self):
+        """Третий способ скачивания (через N_m3u8DL-RE с Clearkey)"""
+        try:
+            # Получаем данные из JSON
+            c = self.json_data
+            if not c:
+                raise Exception("JSON данные не загружены")
+
+            # Ищем playlist
+            if not c.get('options') or not c['options'].get('playlist'):
+                raise Exception("Не найден playlist в JSON")
+
+            p = c["options"]["playlist"][0]
+
+            # Ищем MPD URL в разных возможных местах
+            mpd_url = None
+            sources = p.get("sources", {})
+
+            # Проверяем разные варианты ключей
+            for key in ["shakadash", "shaka-dash", "dash", "mpd"]:
+                if key in sources and isinstance(sources[key], dict) and "src" in sources[key]:
+                    mpd_url = sources[key]["src"]
+                    break
+                elif key in sources and isinstance(sources[key], str):
+                    mpd_url = sources[key]
+                    break
+
+            if not mpd_url:
+                # Если MPD не найден, пробуем HLS и преобразуем в MPD
+                hls_url = None
+                for key in ["hls", "m3u8"]:
+                    if key in sources and isinstance(sources[key], dict) and "src" in sources[key]:
+                        hls_url = sources[key]["src"]
+                        break
+                    elif key in sources and isinstance(sources[key], str):
+                        hls_url = sources[key]
+                        break
+
+                if hls_url:
+                    # Преобразуем HLS URL в MPD URL
+                    mpd_url = hls_url.replace("/master.m3u8", "/master.mpd").replace("/manifest.m3u8", "/manifest.mpd")
+
+            if not mpd_url:
+                raise Exception("Ошибка: не найден URL MPD или HLS")
+
+            # Получаем MPD
+            self.add_progress_message(f"[*] Получение MPD")
+            mpd = requests.get(mpd_url, headers={"Referer": c.get("referrer", "")}).text
+
+            # Поиск KID
+            kid_match = re.search(r'cenc:default_KID="([^"]+)"', mpd)
+            if not kid_match:
+                m = re.search(r'<cenc:pssh[^>]*>([^<]+)</cenc:pssh>', mpd)
+                if m:
+                    try:
+                        pssh = b64decode(m.group(1))
+                        for i in range(len(pssh) - 32):
+                            if pssh[i:i + 4] == b'\x00\x00\x00\x1c' and i + 36 <= len(pssh):
+                                k = pssh[i + 20:i + 36].hex().upper()
+                                # Создаем объект match с найденным KID
+                                kid_match = type('obj', (object,),
+                                                 {'group': lambda
+                                                     x: f"{k[:8]}-{k[8:12]}-{k[12:16]}-{k[16:20]}-{k[20:32]}"})()
+                                break
+                    except:
+                        pass
+
+            kid = kid_match.group(1) if kid_match else "00000000-0000-0000-0000-000000000000"
+
+            # Преобразуем KID в base64
+            kid_clean = kid.replace('-', '')
+            kid_b64 = b64encode(bytes.fromhex(kid_clean)).decode().replace('=', '')
+
+            # Запрос лицензии
+            license_url = p.get("drm", {}).get("clearkey", {}).get("licenseUrl", "")
+            if not license_url:
+                # Ищем license URL в других местах
+                license_url = c.get("drm", {}).get("clearkey", {}).get("licenseUrl", "")
+
+            if not license_url:
+                raise Exception("Не найден license URL для Clearkey")
+
+            self.add_progress_message(f"[*] Получение ключа Clearkey из: {license_url}")
+            resp = requests.post(license_url,
+                                 headers={"Origin": c.get("referrer", ""), "Referer": c.get("referrer", "")},
+                                 json={"kids": [kid_b64], "type": "temporary"})
+
+            result = resp.json()
+
+            # Конвертация и вывод
+            if result.get('keys'):
+                k = result['keys'][0]
+                key_hex = b64decode(k['k'] + '==').hex()
+                kid_hex = b64decode(k['kid'] + '==').hex()
+                key_param = f"{kid_hex}:{key_hex}"
+                self.add_progress_message(f"[+] Получен ключ Clearkey: {key_param}")
+            else:
+                raise Exception(f"Ключи не получены. Ответ: {result}")
+
+            # Получаем HLS URL для скачивания
+            m3u8_url = None
+            for key in ["hls", "m3u8"]:
+                if key in sources and isinstance(sources[key], dict) and "src" in sources[key]:
+                    m3u8_url = sources[key]["src"]
+                    break
+                elif key in sources and isinstance(sources[key], str):
+                    m3u8_url = sources[key]
+                    break
+
+            if not m3u8_url:
+                raise Exception("Не найден HLS URL для скачивания")
+
+            # Собираем команду для N_m3u8DL-RE
+            bin_dir = setup_bin_directory()
+            n_m3u8dl_path = os.path.join(bin_dir, "N_m3u8DL-RE.exe")
+
+            selected_quality = self.quality_combo.get().replace('p', '')
+
+            output_path = self.output_file.get()
+            save_dir = os.path.dirname(output_path)
+
+            # Получаем чистое имя файла без спецсимволов и пробелов
+            video_title = self.video_title.get() or "video_download"
+            save_name_clean = re.sub(r'[\s\\/:*?"<>|]', '_', video_title)
+            save_name_clean = re.sub(r'_+', '_', save_name_clean)
+            save_name_clean = save_name_clean.strip('_')
+
+            command = f'"{n_m3u8dl_path}" "{m3u8_url}" --key {key_param} -M format=mp4 -sv res="{selected_quality}" -sa all --log-level INFO --no-log --save-dir "{save_dir}" --save-name "{save_name_clean}"'
+
+            self.add_progress_message(f"[*] Запуск N_m3u8DL-RE...")
+
+            process = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                                       bufsize=1)
+
+            vid_progress_pattern = re.compile(r'.*?(\d+/\d+\s+\d+\.\d+%)')
+            last_progress = ""
+
+            while True:
+                output = process.stdout.readline()
+                if output == '' and process.poll() is not None:
+                    break
+                if output:
+                    match = vid_progress_pattern.search(output)
+                    if match:
+                        progress_info = match.group(1)
+                        if progress_info != last_progress:
+                            self.add_progress_message(f"Прогресс: {progress_info}")
+                            last_progress = progress_info
+
+            if process.returncode == 0:
+                self.add_progress_message("\n[+] Скачивание завершено (Способ 3)!")
+                messagebox.showinfo("Успех", f"Видео успешно скачано!\nФайл: {output_path}")
+                return True
+            else:
+                self.add_progress_message(f"[!] N_m3u8DL-RE завершился с ошибкой: {process.returncode}")
+                return False
+
+        except Exception as e:
+            self.add_progress_message(f"[!] Ошибка в третьем способе (Clearkey): {str(e)}")
             return False
 
     def _extract_pssh_from_hls(self, master_m3u8_url_full):
