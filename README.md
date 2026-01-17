@@ -3,6 +3,7 @@
 
 # ⬇️ Установка
   Если скачали архив и хотите запустить исполняемый файл, обязательно в папку bin добавьте файлы:
+  
   ffmpeg.exe (https://www.gyan.dev/ffmpeg/builds/ffmpeg-git-full.7z) 
   N_m3u8DL-RE.exe (https://github.com/nilaoda/N_m3u8DL-RE)
   mp4decrypt.exe (https://www.bok.net/Bento4/binaries/Bento4-SDK-1-6-0-641.x86_64-microsoft-win32.zip)
