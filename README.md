@@ -2,13 +2,13 @@
 
 
 # ⬇️ Установка
-  Если скачали архив и хотите запустить исполняемый файл, обязательно в папку bin добавьте файлы:
-  
-  ffmpeg.exe (https://www.gyan.dev/ffmpeg/builds/ffmpeg-git-full.7z) 
-  N_m3u8DL-RE.exe (https://github.com/nilaoda/N_m3u8DL-RE)
-  mp4decrypt.exe (https://www.bok.net/Bento4/binaries/Bento4-SDK-1-6-0-641.x86_64-microsoft-win32.zip)
+  Если скачали архив и хотите запустить исполняемый файл, обязательно в папку bin добавьте файлы: 
 
-  Так же эти файлы уже лежжат в релизной версии, которую можно скачать и сразу запускать.
+ - [Ссылка для скачивания оригинального ffmpeg.exe](https://www.gyan.dev/ffmpeg/builds/ffmpeg-git-full.7z)
+ - [Ссылка для скачивания оригинального N_m3u8DL-RE.exe](https://github.com/nilaoda/N_m3u8DL-RE)
+ - [Ссылка для скачивания оригинального mp4decrypt.exe](https://www.bok.net/Bento4/binaries/Bento4-SDK-1-6-0-641.x86_64-microsoft-win32.zip)
+
+  Так же эти файлы уже лежат в релизной версии, которую можно скачать и сразу запускать.
 
 Главный файл естетсвенно main.py
 
