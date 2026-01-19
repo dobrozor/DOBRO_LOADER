@@ -41,7 +41,6 @@ class Api:
 
     def select_json(self):
         window = self._get_window()
-        # Разрешаем выбор нескольких файлов сразу
         results = window.create_file_dialog(
             webview.OPEN_DIALOG,
             file_types=('JSON (*.json)',),
@@ -55,32 +54,34 @@ class Api:
             try:
                 if not self.logic: self.logic = KinescopeLogic(lambda x: None)
 
-                info = self.logic.extract_from_json(path)
-                task_id = str(uuid.uuid4())[:8]
+                # Теперь extract_from_json возвращает СПИСОК
+                video_list = self.logic.extract_from_json(path)
 
-                qualities = []
-                data = info['data']
-                if 'options' in data and 'playlist' in data['options']:
-                    for item in data['options']['playlist']:
-                        if 'frameRate' in item:
-                            qualities = sorted([int(q) for q in item['frameRate'].keys() if q.isdigit()], reverse=True)
+                for video_info in video_list:
+                    task_id = str(uuid.uuid4())[:8]
 
-                self.tasks[task_id] = {
-                    'info': info,
-                    'progress': {'video': 0, 'audio': 0},
-                    'path': path
-                }
+                    # Получаем качества для конкретного видео
+                    qualities = []
+                    item = video_info['video_data']
+                    if 'frameRate' in item:
+                        qualities = sorted([int(q) for q in item['frameRate'].keys() if q.isdigit()], reverse=True)
 
-                new_tasks.append({
-                    "id": task_id,
-                    "filename": info['title'] or os.path.basename(path),
-                    "qualities": qualities or [1080, 720, 480, 360]
-                })
+                    self.tasks[task_id] = {
+                        'info': video_info,
+                        'progress': {'video': 0, 'audio': 0},
+                        'path': path
+                    }
+
+                    new_tasks.append({
+                        "id": task_id,
+                        "filename": video_info['title'],
+                        "qualities": qualities or [1080, 720, 480, 360]
+                    })
             except Exception as e:
                 print(f"Ошибка при чтении {path}: {e}")
                 continue
 
-        return new_tasks  # Возвращаем список созданных задач
+        return new_tasks
 
     def delete_task(self, task_id):
         if task_id in self.tasks:

@@ -46,15 +46,31 @@ class KinescopeLogic:
     def extract_from_json(self, json_filepath):
         with open(json_filepath, 'r', encoding='utf-8') as f:
             data = json.load(f)
+
         video_url = data.get('url', '')
         referer = data.get('referrer', '')
-        video_title = ''
-        if data.get('options') and isinstance(data['options'].get('playlist'), list) and len(
-                data['options']['playlist']) > 0:
-            video_title = data['options']['playlist'][0].get('title', '')
-        if not video_title:
-            video_title = data.get('meta', {}).get('title', 'video_download')
-        return {"url": video_url, "referer": referer, "title": video_title, "data": data}
+
+        results = []
+
+        # Проверяем наличие плейлиста
+        playlist = data.get('options', {}).get('playlist', [])
+
+        if isinstance(playlist, list) and len(playlist) > 0:
+            for item in playlist:
+                video_title = item.get('title') or data.get('meta', {}).get('title', 'video_download')
+                # Создаем отдельный объект для каждого видео, сохраняя общие мета-данные
+                results.append({
+                    "url": video_url,
+                    "referer": referer,
+                    "title": video_title,
+                    "video_data": item,  # Данные конкретного ролика
+                    "full_data": data  # Общие данные (для реферера и т.д.)
+                })
+        else:
+            # Резервный вариант, если плейлиста нет
+            results.append({"url": video_url, "referer": referer, "title": "video", "data": data})
+
+        return results
 
     def get_key(self, pssh, license_url, referer):
         if not os.path.exists(self.wvd_path):
@@ -78,15 +94,26 @@ class KinescopeLogic:
 
     def _extract_stream_urls(self, data):
         mpd_url, m3u8_url = None, None
-        if data and 'options' in data and 'playlist' in data['options']:
-            for item in data['options']['playlist']:
-                if 'sources' in item:
-                    if 'shakadash' in item['sources']:
-                        mpd_url = item['sources']['shakadash'].get('src')
-                    if 'hls' in item['sources']:
-                        m3u8_url = item['sources']['hls'].get('src')
+
+        # Проверяем наличие sources напрямую в переданном объекте
+        sources = data.get('sources', [])
+        if isinstance(sources, list):
+            # Если sources - это список объектов
+            for s in sources:
+                src = s.get('src', '')
+                if 'master.mpd' in src or 'manifest.mpd' in src:
+                    mpd_url = src
+                if 'master.m3u8' in src or 'manifest.m3u8' in src:
+                    m3u8_url = src
+        elif isinstance(sources, dict):
+            # Если sources - это словарь (как было в старой версии вашего кода)
+            mpd_url = sources.get('shakadash', {}).get('src')
+            m3u8_url = sources.get('hls', {}).get('src')
+
+        # Если нашли только m3u8, пробуем угадать mpd (нужен для получения PSSH)
         if not mpd_url and m3u8_url:
-            mpd_url = m3u8_url.replace('/master.m3u8', '/master.mpd').replace('/manifest.m3u8', '/manifest.mpd')
+            mpd_url = m3u8_url.replace('.m3u8', '.mpd')
+
         return mpd_url, m3u8_url
 
     def run_n_m3u8dl(self, url, keys, quality, save_dir, save_name, method_name):
@@ -95,7 +122,7 @@ class KinescopeLogic:
         save_name_clean = re.sub(r'[\s\\/:*?"<>|]', '_', save_name).strip('_')
 
         # Важно: добавляем --log-level INFO и убираем подавление логов
-        command = f'"{n_m3u8dl_path}" "{url}" {key_params} -M format=mp4 -sv res="{quality}" -sa all --log-level INFO --save-dir "{save_dir}" --save-name "{save_name_clean}"'
+        command = f'"{n_m3u8dl_path}" "{url}" {key_params} -M format=mp4 -sv res="{quality}" -sa ru --log-level INFO --save-dir "{save_dir}" --save-name "{save_name_clean}"'
 
         self.log(f"[*] Запуск {method_name}...")
 
@@ -106,7 +133,7 @@ class KinescopeLogic:
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,  # Объединяем ошибки и стандартный вывод
             text=True,
-            encoding='utf-8',
+            encoding='cp866',
             errors='replace',
             bufsize=1
         )
@@ -121,17 +148,19 @@ class KinescopeLogic:
         return process.returncode == 0
 
     def download_pipeline(self, info, quality, output_path):
-        data = info['data']
+        # info теперь содержит video_data (конкретный ролик)
+        video_item = info['video_data']
         referer = info['referer']
         save_dir = os.path.dirname(output_path)
         save_name = os.path.splitext(os.path.basename(output_path))[0]
-        mpd_url, m3u8_url = self._extract_stream_urls(data)
+
+        # Извлекаем ссылки именно для этого видео
+        mpd_url, m3u8_url = self._extract_stream_urls(video_item)
 
         # Способ 2: Widevine
-        self.log("[*] Пробуем Способ 2 (Widevine)...")
+        self.log(f"[*] Пробуем Widevine для: {info['title']}")
         try:
-            pssh = None
-            license_url = data['options']['playlist'][0]['drm']['widevine']['licenseUrl']
+            license_url = video_item['drm']['widevine']['licenseUrl']
             mpd_content = requests.get(mpd_url, timeout=10).text
             pssh_match = re.search(r'<cenc:pssh[^>]*>([^<]+)</cenc:pssh>', mpd_content)
             if pssh_match:
@@ -145,18 +174,27 @@ class KinescopeLogic:
         # Способ 3: Clearkey
         self.log("[!] Способ 2 не сработал. Пробуем Способ 3 (Clearkey)...")
         try:
-            p = data["options"]["playlist"][0]
-            kid_match = re.search(r'cenc:default_KID="([^"]+)"', requests.get(mpd_url).text)
+            # Вместо p = data["options"]["playlist"][0] используем данные текущего видео
+            video_item = info['video_data']
+
+            mpd_response = requests.get(mpd_url, timeout=10).text
+            kid_match = re.search(r'cenc:default_KID="([^"]+)"', mpd_response)
+
             if kid_match:
                 kid = kid_match.group(1).replace('-', '')
                 kid_b64 = b64encode(bytes.fromhex(kid)).decode().replace('=', '')
-                lic_url = p.get("drm", {}).get("clearkey", {}).get("licenseUrl", "")
-                resp = requests.post(lic_url, headers={"Origin": referer, "Referer": referer},
-                                     json={"kids": [kid_b64], "type": "temporary"}).json()
-                k = resp['keys'][0]
-                key_param = f"{b64decode(k['kid'] + '==').hex()}:{b64decode(k['k'] + '==').hex()}"
-                if self.run_n_m3u8dl(m3u8_url, [key_param], quality, save_dir, save_name, "Clearkey"):
-                    return True
+
+                # Берем licenseUrl из структуры drm -> clearkey
+                lic_url = video_item.get("drm", {}).get("clearkey", {}).get("licenseUrl", "")
+
+                if lic_url:
+                    resp = requests.post(lic_url, headers={"Origin": referer, "Referer": referer},
+                                         json={"kids": [kid_b64], "type": "temporary"}).json()
+                    k = resp['keys'][0]
+                    key_param = f"{b64decode(k['kid'] + '==').hex()}:{b64decode(k['k'] + '==').hex()}"
+
+                    if self.run_n_m3u8dl(m3u8_url, [key_param], quality, save_dir, save_name, "Clearkey"):
+                        return True
         except:
             pass
 
