@@ -7,8 +7,12 @@
         /* Основной фон теперь светлый */
         body { background: #f8fafc; color: #1e293b; font-family: 'Segoe UI', sans-serif; height: 100vh; overflow: hidden; }
 
-        .custom-scroll::-webkit-scrollbar { width: 6px; }
-        .custom-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        /* Настройка широкого и видимого скроллбара */
+        .custom-scroll { overflow-y: auto; }
+        .custom-scroll::-webkit-scrollbar { width: 12px; }
+        .custom-scroll::-webkit-scrollbar-track { background: #f1f5f9; border-left: 1px solid #e2e8f0; }
+        .custom-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 6px; border: 3px solid #f1f5f9; }
+        .custom-scroll::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
 
         /* Элементы списка на светлом фоне */
         .download-item { border-bottom: 1px solid #e2e8f0; background: white; transition: background 0.2s; }
@@ -28,18 +32,27 @@
         <div class="flex items-center gap-3">
             <img src="logo.png" class="h-16">
         </div>
-        <div class="flex gap-2">
+        <div class="flex gap-2 items-center">
             <button onclick="pickFile()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 transition shadow-md">
                 <span>+</span> ДОБАВИТЬ JSON
             </button>
+            <div class="flex flex-col justify-center items-center ml-2 mr-2">
+                <button onclick="pickFolder()" class="bg-slate-200 hover:bg-slate-300 text-slate-700 px-3 py-1 rounded text-xs font-bold transition shadow-sm border border-slate-300">
+                    📁 ВЫБРАТЬ ПАПКУ
+                </button>
+                <span id="folder-path" class="text-[9px] text-slate-500 mt-1 max-w-[120px] truncate" title="Там же где JSON">Там же где JSON</span>
+            </div>
+            <button onclick="clearList()" class="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg text-sm font-bold transition shadow-md">
+                ОЧИСТИТЬ
+            </button>
             <button onclick="startAll()" class="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm font-bold transition shadow-md">
-                ▶ СКАЧАТЬ ВСЕ
+                ▶ СКАЧАТЬ ВЫБРАННЫЕ
             </button>
         </div>
     </div>
 
-    <div class="flex flex-1 overflow-hidden">
-        <div class="flex-1 overflow-y-auto custom-scroll bg-slate-50" id="tasks-list">
+    <div class="flex flex-1 overflow-hidden min-h-0">
+        <div class="flex-1 overflow-y-auto custom-scroll bg-slate-50 pb-16" id="tasks-list">
             </div>
 
         <div id="log-panel" class="w-1/3 log-panel flex flex-col">
@@ -62,6 +75,17 @@
 
     <script>
         let tasks = {};
+        let selectedFolder = null;
+
+        async function pickFolder() {
+            const result = await pywebview.api.select_folder();
+            if (result) {
+                selectedFolder = result;
+                const folderDisplay = document.getElementById('folder-path');
+                folderDisplay.innerText = result.split(/[\\/]/).pop() || result;
+                folderDisplay.title = result;
+            }
+        }
 
         async function pickFile() {
             const results = await pywebview.api.select_json();
@@ -81,13 +105,17 @@
             row.id = `task-${id}`;
             row.className = 'download-item p-4 flex items-center gap-4';
             row.innerHTML = `
+                <div class="flex items-center gap-3">
+                    <input type="checkbox" id="check-${id}" class="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500 cursor-pointer" checked>
+                </div>
+                
                 <div class="flex-1 min-w-0">
                     <div class="text-sm font-semibold text-slate-800 truncate" title="${data.filename}">${data.filename}</div>
                     <div class="text-[10px] text-slate-500 mt-1 uppercase font-bold">${data.quality_label || 'JSON'}</div>
                 </div>
 
                 <div class="flex items-center gap-2">
-                    <button onclick="removeTask('${id}')" class="bg-red-50 hover:bg-red-100 p-2 rounded text-red-500 transition border border-red-100">
+                    <button onclick="removeTask('${id}')" class="bg-red-50 hover:bg-red-100 p-2 rounded text-red-500 transition border border-red-100" title="Удалить">
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
                     </button>
                 </div>
@@ -126,7 +154,7 @@
             const q = document.getElementById(`select-${id}`).value;
             document.getElementById(`btn-${id}`).disabled = true;
             document.getElementById(`btn-${id}`).classList.add('opacity-30');
-            pywebview.api.start_download(id, q);
+            pywebview.api.start_download(id, q, selectedFolder);
         }
 
         function showLog(id) {
@@ -169,10 +197,20 @@
         function startAll() {
             Object.keys(tasks).forEach(id => {
                 const btn = document.getElementById(`btn-${id}`);
-                if (btn && !btn.disabled) {
+                const checkbox = document.getElementById(`check-${id}`);
+                
+                // Запускаем только если галочка стоит и кнопка старта еще активна (не запущено)
+                if (btn && !btn.disabled && checkbox && checkbox.checked) {
                     startTask(id);
                 }
             });
+        }
+
+        function clearList() {
+            if (confirm("Вы уверены, что хотите полностью очистить весь список?")) {
+                const taskIds = Object.keys(tasks);
+                taskIds.forEach(id => removeTask(id, false)); // false чтобы не спрашивать подтверждение для каждого
+            }
         }
 
         function renderLog(id) {
@@ -184,25 +222,25 @@
             }
         }
 
-        function removeTask(id) {
-    if (confirm("Удалить задачу из списка?")) {
-        // Удаляем визуальный элемент
-        const row = document.getElementById(`task-${id}`);
-        if (row) row.remove();
+        function removeTask(id, askConfirm = true) {
+            if (!askConfirm || confirm("Удалить задачу из списка?")) {
+                // Удаляем визуальный элемент
+                const row = document.getElementById(`task-${id}`);
+                if (row) row.remove();
 
-        // Если открыт лог этой задачи — закрываем его
-        const activeLogTitle = document.getElementById('current-log-title').innerText;
-        if (activeLogTitle === tasks[id].filename) {
-            closeLog();
+                // Если открыт лог этой задачи — закрываем его
+                const activeLogTitle = document.getElementById('current-log-title').innerText;
+                if (tasks[id] && activeLogTitle === tasks[id].filename) {
+                    closeLog();
+                }
+
+                // Удаляем из локального хранилища JS
+                delete tasks[id];
+
+                // Удаляем из памяти Python
+                pywebview.api.delete_task(id);
+            }
         }
-
-        // Удаляем из локального хранилища JS
-        delete tasks[id];
-
-        // Удаляем из памяти Python
-        pywebview.api.delete_task(id);
-    }
-}
 
         // Вызывается из Python
         window.updateTaskProgress = (id, percent, status) => {
