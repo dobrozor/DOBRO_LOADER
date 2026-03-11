@@ -242,8 +242,9 @@ class KinescopeLogic:
         self.log(f"[DOWNLOAD] Имя файла: {save_name}")
 
         n_m3u8dl_path = os.path.join(self.bin_dir, "N_m3u8DL-RE.exe")
+        safe_path = n_m3u8dl_path.replace('\\', '/')
+        
         if not os.path.exists(n_m3u8dl_path):
-            safe_path = n_m3u8dl_path.replace('\\', '/')
             self.log(f"[DOWNLOAD] ❌ N_m3u8DL-RE не найден по пути: {safe_path}")
             return False
 
