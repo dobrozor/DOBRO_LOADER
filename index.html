@@ -32,10 +32,16 @@
         <div class="flex items-center gap-3">
             <img src="logo.png" class="h-16">
         </div>
-        <div class="flex gap-2">
+        <div class="flex gap-2 items-center">
             <button onclick="pickFile()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 transition shadow-md">
                 <span>+</span> ДОБАВИТЬ JSON
             </button>
+            <div class="flex flex-col justify-center items-center ml-2 mr-2">
+                <button onclick="pickFolder()" class="bg-slate-200 hover:bg-slate-300 text-slate-700 px-3 py-1 rounded text-xs font-bold transition shadow-sm border border-slate-300">
+                    📁 ВЫБРАТЬ ПАПКУ
+                </button>
+                <span id="folder-path" class="text-[9px] text-slate-500 mt-1 max-w-[120px] truncate" title="Там же где JSON">Там же где JSON</span>
+            </div>
             <button onclick="clearList()" class="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg text-sm font-bold transition shadow-md">
                 ОЧИСТИТЬ
             </button>
@@ -69,6 +75,17 @@
 
     <script>
         let tasks = {};
+        let selectedFolder = null;
+
+        async function pickFolder() {
+            const result = await pywebview.api.select_folder();
+            if (result) {
+                selectedFolder = result;
+                const folderDisplay = document.getElementById('folder-path');
+                folderDisplay.innerText = result.split(/[\\/]/).pop() || result;
+                folderDisplay.title = result;
+            }
+        }
 
         async function pickFile() {
             const results = await pywebview.api.select_json();
@@ -137,7 +154,7 @@
             const q = document.getElementById(`select-${id}`).value;
             document.getElementById(`btn-${id}`).disabled = true;
             document.getElementById(`btn-${id}`).classList.add('opacity-30');
-            pywebview.api.start_download(id, q);
+            pywebview.api.start_download(id, q, selectedFolder);
         }
 
         function showLog(id) {

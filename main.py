@@ -43,6 +43,15 @@ class Api:
         if "Merging" in message or "Muxing" in message:
             window.evaluate_js(f"updateTaskProgress('{task_id}', 100, 'Склейка...')")
 
+    def select_folder(self):
+        window = self._get_window()
+        result = window.create_file_dialog(
+            webview.FOLDER_DIALOG
+        )
+        if result and len(result) > 0:
+            return result[0]
+        return None
+
     def select_json(self):
         window = self._get_window()
         results = window.create_file_dialog(
@@ -94,7 +103,7 @@ class Api:
             return True
         return False
 
-    def start_download(self, task_id, quality):
+    def start_download(self, task_id, quality, custom_folder=None):
         task = self.tasks.get(task_id)
         if not task: return
 
@@ -103,12 +112,19 @@ class Api:
                 # Создаем экземпляр логики специально для этой задачи, чтобы лог шел правильно
                 task_logic = KinescopeLogic(lambda msg: self.send_log(task_id, msg))
 
+                base_dir = custom_folder if custom_folder else os.path.dirname(task['path'])
+
                 save_path = os.path.join(
-                    os.path.dirname(task['path']),
+                    base_dir,
                     re.sub(r'[\s\\/:*?"<>|]', '_', task['info']['title'].strip()) + f"_{quality}p.mp4"
                 )
 
-                self.send_log(task_id, f"🚀 Очередь дошла, старт: {quality}p")
+                if os.path.exists(save_path):
+                    self.send_log(task_id, f"✅ Файл уже существует: {save_path}. Пропуск.")
+                    self._get_window().evaluate_js(f"updateTaskProgress('{task_id}', 100, 'Уже скачано')")
+                    return
+
+                self.send_log(task_id, f"🚀 Очередь дошла, старт: {quality}p в {base_dir}")
                 
                 try:
                     success = task_logic.download_pipeline(task['info'], quality, save_path)
