@@ -3,6 +3,8 @@ import webview
 import uuid
 import os
 import threading
+import traceback
+from concurrent.futures import ThreadPoolExecutor
 from downloader_logic import KinescopeLogic
 
 
@@ -10,6 +12,8 @@ class Api:
     def __init__(self):
         self.logic = None
         self.tasks = {}  # Храним инфо о задачах: {id: {info, progress_states}}
+        # Процессор очереди скачиваний (максимум 3 одновременно)
+        self.executor = ThreadPoolExecutor(max_workers=3)
 
     def _get_window(self):
         return webview.windows[0] if webview.windows else None
@@ -95,24 +99,37 @@ class Api:
         if not task: return
 
         def run():
-            # Создаем экземпляр логики специально для этой задачи, чтобы лог шел правильно
-            task_logic = KinescopeLogic(lambda msg: self.send_log(task_id, msg))
+            try:
+                # Создаем экземпляр логики специально для этой задачи, чтобы лог шел правильно
+                task_logic = KinescopeLogic(lambda msg: self.send_log(task_id, msg))
 
-            save_path = os.path.join(
-                os.path.dirname(task['path']),
-                re.sub(r'[\s\\/:*?"<>|]', '_', task['info']['title']) + f"_{quality}p.mp4"
-            )
+                save_path = os.path.join(
+                    os.path.dirname(task['path']),
+                    re.sub(r'[\s\\/:*?"<>|]', '_', task['info']['title'].strip()) + f"_{quality}p.mp4"
+                )
 
-            self.send_log(task_id, f"🚀 Старт: {quality}p")
-            success = task_logic.download_pipeline(task['info'], quality, save_path)
+                self.send_log(task_id, f"🚀 Очередь дошла, старт: {quality}p")
+                
+                try:
+                    success = task_logic.download_pipeline(task['info'], quality, save_path)
+                except Exception as e:
+                    self.send_log(task_id, f"❌ Системная ошибка скачивания: {str(e)}\n{traceback.format_exc()}")
+                    success = False
 
-            if success:
-                self.send_log(task_id, "✅ ГОТОВО")
-                self._get_window().evaluate_js(f"updateTaskProgress('{task_id}', 100, 'Завершено')")
-            else:
-                self.send_log(task_id, "❌ ОШИБКА")
+                if success:
+                    self.send_log(task_id, "✅ ГОТОВО")
+                    self._get_window().evaluate_js(f"updateTaskProgress('{task_id}', 100, 'Завершено')")
+                else:
+                    self.send_log(task_id, "❌ ОШИБКА")
+                    self._get_window().evaluate_js(f"updateTaskProgress('{task_id}', 0, 'Ошибка')")
+                    
+            except Exception as e:
+                self.send_log(task_id, f"❌ КРИТИЧЕСКАЯ ОШИБКА ПОТОКА: {str(e)}\n{traceback.format_exc()}")
+                self._get_window().evaluate_js(f"updateTaskProgress('{task_id}', 0, 'Критическая ошибка')")
 
-        threading.Thread(target=run, daemon=True).start()
+        self.send_log(task_id, "⏳ Ожидание в очереди...")
+        self._get_window().evaluate_js(f"updateTaskProgress('{task_id}', 0, 'В очереди...')")
+        self.executor.submit(run)
 
 
 def main():
