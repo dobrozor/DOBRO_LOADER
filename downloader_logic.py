@@ -28,20 +28,26 @@ class KinescopeLogic:
             base_path = sys._MEIPASS
             self.log(f"[RESOURCE] Режим PyInstaller, базовый путь: {base_path}")
         except Exception:
-            base_path = os.path.dirname(os.path.abspath(sys.argv[0]))
+            base_path = os.path.dirname(os.path.abspath(__file__))
             self.log(f"[RESOURCE] Обычный режим, базовый путь: {base_path}")
         full_path = os.path.join(base_path, relative_path)
-        self.log(f"[RESOURCE] Полный путь к ресурсу '{relative_path}': {full_path}")
+        
+        # Исправляем логирование, чтобы Python не воспринимал слеши \b, \n как спецсимволы
+        safe_full = full_path.replace('\\', '/')
+        self.log(f"[RESOURCE] Полный путь к ресурсу '{relative_path}': {safe_full}")
         return full_path
 
     def setup_bin_directory(self):
         """Настраивает директорию с бинарными файлами"""
-        bin_dir = os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), "bin")
+        # Исправляем путь, чтобы слеши не терялись.
+        # Используем os.path.dirname(__file__) для надежности
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        bin_dir = os.path.join(base_dir, "bin")
         os.makedirs(bin_dir, exist_ok=True)
         self.log(f"[SETUP] Создана/проверена директория бинарников: {bin_dir}")
 
         files = {
-            "ffmpeg/bin/ffmpeg.exe": "ffmpeg.exe",
+            os.path.join("ffmpeg", "bin", "ffmpeg.exe"): "ffmpeg.exe",
             "mp4decrypt.exe": "mp4decrypt.exe",
             "N_m3u8DL-RE.exe": "N_m3u8DL-RE.exe"
         }
@@ -51,8 +57,11 @@ class KinescopeLogic:
             dst = os.path.join(bin_dir, dst_name)
             if os.path.exists(src):
                 if not os.path.exists(dst):
-                    shutil.copy2(src, dst)
-                    self.log(f"[SETUP] Скопирован бинарник: {src} -> {dst}")
+                    try:
+                        shutil.copy2(src, dst)
+                        self.log(f"[SETUP] Скопирован бинарник: {src} -> {dst}")
+                    except Exception as e:
+                        self.log(f"[SETUP] ⚠️ Ошибка копирования {src}: {e}")
                 else:
                     self.log(f"[SETUP] Бинарник уже существует: {dst}")
             else:
@@ -234,7 +243,8 @@ class KinescopeLogic:
 
         n_m3u8dl_path = os.path.join(self.bin_dir, "N_m3u8DL-RE.exe")
         if not os.path.exists(n_m3u8dl_path):
-            self.log(f"[DOWNLOAD] ❌ N_m3u8DL-RE не найден: {n_m3u8dl_path}")
+            safe_path = n_m3u8dl_path.replace('\\', '/')
+            self.log(f"[DOWNLOAD] ❌ N_m3u8DL-RE не найден по пути: {safe_path}")
             return False
 
         # Формирование параметров ключей
@@ -254,8 +264,14 @@ class KinescopeLogic:
             self.log(f"[DOWNLOAD] Имя файла очищено: '{save_name}' -> '{save_name_clean}'")
 
         # Формирование команды
-        command = f'"{n_m3u8dl_path}" "{url}" {key_params} -M format=mp4 -sv res="{quality}" -sa ru --log-level INFO --save-dir "{save_dir}" --save-name "{save_name_clean}"'
+        # Обернул пути в экранированные кавычки для надежности в Windows
+        command = f'"{safe_path}" "{url}" {key_params} -M format=mp4 -sv res="{quality}" -sa ru --log-level INFO --save-dir "{save_dir}" --save-name "{save_name_clean}"'
         self.log(f"[DOWNLOAD] Команда: {command[:100]}...")
+
+        # Настройка переменных окружения для передачи пути к ffmpeg
+        env = os.environ.copy()
+        ffmpeg_bin_dir = os.path.join(self.bin_dir, "ffmpeg", "bin")
+        env["PATH"] = f"{self.bin_dir};{ffmpeg_bin_dir};" + env.get("PATH", "")
 
         # Запуск процесса
         self.log(f"[DOWNLOAD] Запуск N_m3u8DL-RE ({method_name})...")
@@ -268,7 +284,8 @@ class KinescopeLogic:
                 text=True,
                 encoding='utf-8',
                 errors='replace',
-                bufsize=1
+                bufsize=1,
+                env=env  # Передаем обновленные пути!
             )
 
             download_progress = []
