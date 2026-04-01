@@ -31,7 +31,7 @@ class KinescopeLogic:
             base_path = os.path.dirname(os.path.abspath(__file__))
             self.log(f"[RESOURCE] Обычный режим, базовый путь: {base_path}")
         full_path = os.path.join(base_path, relative_path)
-        
+
         # Исправляем логирование, чтобы Python не воспринимал слеши \b, \n как спецсимволы
         safe_full = full_path.replace('\\', '/')
         self.log(f"[RESOURCE] Полный путь к ресурсу '{relative_path}': {safe_full}")
@@ -243,7 +243,7 @@ class KinescopeLogic:
 
         n_m3u8dl_path = os.path.join(self.bin_dir, "N_m3u8DL-RE.exe")
         safe_path = n_m3u8dl_path.replace('\\', '/')
-        
+
         if not os.path.exists(n_m3u8dl_path):
             self.log(f"[DOWNLOAD] ❌ N_m3u8DL-RE не найден по пути: {safe_path}")
             return False
@@ -267,7 +267,7 @@ class KinescopeLogic:
         # Формирование команды
         # Обернул пути в экранированные кавычки для надежности в Windows
         command = f'"{safe_path}" "{url}" {key_params} -M format=mp4 -sv res="{quality}" -sa ru --log-level INFO --save-dir "{save_dir}" --save-name "{save_name_clean}"'
-        self.log(f"[DOWNLOAD] Команда: {command[:100]}...")
+        self.log(f"[DOWNLOAD] Команда: {command}...")
 
         # Настройка переменных окружения для передачи пути к ffmpeg
         env = os.environ.copy()
@@ -394,29 +394,41 @@ class KinescopeLogic:
             mpd_response = requests.get(mpd_url, timeout=15)
             mpd_response.raise_for_status()
 
+            # Извлекаем default_KID из манифеста
             self.log("[CLEARKEY] Поиск default_KID в манифесте...")
             kid_match = re.search(r'cenc:default_KID="([^"]+)"', mpd_response.text)
             if not kid_match:
                 self.log("[CLEARKEY] ❌ default_KID не найден")
                 raise ValueError("KID не найден")
 
-            kid = kid_match.group(1).replace('-', '')
-            kid_b64 = b64encode(bytes.fromhex(kid)).decode().replace('=', '')
-            self.log(f"[CLEARKEY] ✓ Найден KID: {kid}")
-            self.log(f"[CLEARKEY] KID (base64): {kid_b64}")
+            kid_hex = kid_match.group(1).replace('-', '')
+            self.log(f"[CLEARKEY] ✓ Найден KID: {kid_hex}")
 
+            # Получаем licenseUrl для Clearkey
             lic_url = video_item.get('drm', {}).get('clearkey', {}).get('licenseUrl')
             if not lic_url:
                 self.log("[CLEARKEY] ❌ licenseUrl для Clearkey не найден")
                 raise KeyError("Clearkey licenseUrl отсутствует")
 
             self.log(f"[CLEARKEY] Отправка запроса на лицензионный сервер: {lic_url[:60]}...")
-            resp = requests.post(
-                lic_url,
-                headers={"Origin": referer, "Referer": referer},
-                json={"kids": [kid_b64], "type": "temporary"},
-                timeout=15
-            )
+
+            # Формируем KID в base64 без padding
+            kid_b64 = b64encode(bytes.fromhex(kid_hex)).decode().rstrip('=')
+
+            # Отправляем запрос к Clearkey серверу
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Referer': referer,
+                'Origin': referer.split('/')[0] + '//' + referer.split('/')[2] if referer else '',
+                'Content-Type': 'application/json'
+            }
+
+            payload = {
+                "kids": [kid_b64],
+                "type": "temporary"
+            }
+
+            resp = requests.post(lic_url, json=payload, headers=headers, timeout=15)
             resp.raise_for_status()
             license_data = resp.json()
             self.log(f"[CLEARKEY] ✓ Ответ сервера получен")
@@ -425,16 +437,21 @@ class KinescopeLogic:
                 self.log("[CLEARKEY] ❌ Ключи не найдены в ответе сервера")
                 raise ValueError("Ключи отсутствуют в ответе")
 
-            k = license_data['keys'][0]
-            key_param = f"{b64decode(k['kid'] + '==').hex()}:{b64decode(k['k'] + '==').hex()}"
+            # Извлекаем ключ - правильно формируем KID:KEY
+            key_data = license_data['keys'][0]
+            key_hex = b64decode(key_data['k'] + '==').hex()
+            key_param = f"{kid_hex}:{key_hex}"
+
             self.log(
                 f"[CLEARKEY] Извлечён ключ: KID={key_param.split(':')[0][:8]}... | KEY={key_param.split(':')[1][:8]}...")
 
+            # Запускаем скачивание с правильным ключом
             if self.run_n_m3u8dl(m3u8_url, [key_param], quality, save_dir, save_name, "Clearkey"):
                 self.log(f"\n{'=' * 60}")
                 self.log(f"[PIPELINE] ✓ УСПЕХ: Видео скачано через Clearkey DRM")
                 self.log(f"{'=' * 60}\n")
                 return True
+
 
         except Exception as e:
             self.log(f"[CLEARKEY] ⚠️ Способ 3 (Clearkey) завершился с ошибкой: {type(e).__name__}: {str(e)}")
@@ -470,7 +487,8 @@ class KinescopeLogic:
             if not video_id and 'playerId' in log_data:
                 video_id = log_data['playerId'].replace('player_', '')
 
-            referer = log_data.get('referrer') or log_data.get('options', {}).get('metrics', {}).get('urlParams', {}).get('referrer')
+            referer = log_data.get('referrer') or log_data.get('options', {}).get('metrics', {}).get('urlParams',
+                                                                                                     {}).get('referrer')
 
             # Извлекаем токен из URL
             url_with_token = log_data.get('url', '')
