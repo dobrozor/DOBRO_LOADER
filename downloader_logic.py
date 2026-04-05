@@ -267,7 +267,7 @@ class KinescopeLogic:
         # Формирование команды
         # Обернул пути в экранированные кавычки для надежности в Windows
         command = f'"{safe_path}" "{url}" {key_params} -M format=mp4 -sv res="{quality}" -sa ru --log-level INFO --save-dir "{save_dir}" --save-name "{save_name_clean}"'
-        self.log(f"[DOWNLOAD] Команда: {command}...")
+        self.log(f"[DOWNLOAD] Команда: {command}")
 
         # Настройка переменных окружения для передачи пути к ffmpeg
         env = os.environ.copy()
