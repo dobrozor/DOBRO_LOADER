@@ -75,6 +75,7 @@ class KinescopeLogic:
         with open(json_filepath, 'r', encoding='utf-8') as f:
             data = json.load(f)
 
+
         video_url = data.get('url', '')
         referer = data.get('referrer', '')
         self.log(f"[JSON] URL видео: {video_url[:50]}...")
@@ -267,7 +268,7 @@ class KinescopeLogic:
         # Формирование команды
         # Обернул пути в экранированные кавычки для надежности в Windows
         command = f'"{safe_path}" "{url}" {key_params} -M format=mp4 -sv res="{quality}" -sa ru --log-level INFO --save-dir "{save_dir}" --save-name "{save_name_clean}"'
-        self.log(f"[DOWNLOAD] Команда: {command}")
+        self.log(f"[DOWNLOAD] Команда: {command[:100]}...")
 
         # Настройка переменных окружения для передачи пути к ffmpeg
         env = os.environ.copy()
@@ -321,6 +322,14 @@ class KinescopeLogic:
     def download_pipeline(self, info, quality, output_path):
         """Основной конвейер скачивания видео"""
         video_title = info['title']
+
+
+        # ПРОВЕРКА ПРИ НАЖАТИИ НА СКАЧИВАНИЕ
+        # Передаем полные данные JSON для анализа системы защиты
+        if not self.check_drm_support(info.get('full_data', {})):
+            return False
+
+
         self.log(f"\n{'=' * 60}")
         self.log(f"[PIPELINE] НАЧАЛО СКАЧИВАНИЯ: {video_title}")
         self.log(f"{'=' * 60}")
@@ -387,74 +396,35 @@ class KinescopeLogic:
         except Exception as e:
             self.log(f"[WIDEVINE] ⚠️ Способ 2 (Widevine) завершился с ошибкой: {type(e).__name__}: {str(e)}")
 
-        # === СПОСОБ 3: CLEARKEY ===
-        self.log("\n[PIPELINE] === СПОСОБ 3: CLEARKEY DRM ===")
-        try:
-            self.log("[CLEARKEY] Загрузка MPD для извлечения KID...")
-            mpd_response = requests.get(mpd_url, timeout=15)
-            mpd_response.raise_for_status()
+            # === СПОСОБ 3: CLEARKEY ===
+            self.log("\n[PIPELINE] === СПОСОБ 3: CLEARKEY DRM ===")
+            try:
+                clearkey_info = video_item.get('drm', {}).get('clearkey', {})
+                license_url_ck = clearkey_info.get('licenseUrl')
 
-            # Извлекаем default_KID из манифеста
-            self.log("[CLEARKEY] Поиск default_KID в манифесте...")
-            kid_match = re.search(r'cenc:default_KID="([^"]+)"', mpd_response.text)
-            if not kid_match:
-                self.log("[CLEARKEY] ❌ default_KID не найден")
-                raise ValueError("KID не найден")
+                if license_url_ck:
+                    # 1. Пробуем взять KID из JSON
+                    kid_hex = self.extract_kid_from_json(video_item)
 
-            kid_hex = kid_match.group(1).replace('-', '')
-            self.log(f"[CLEARKEY] ✓ Найден KID: {kid_hex}")
+                    # 2. Если в JSON нет, тянем из MPD
+                    if not kid_hex:
+                        kid_hex = self.extract_kid_from_manifest(mpd_url, referer)
 
-            # Получаем licenseUrl для Clearkey
-            lic_url = video_item.get('drm', {}).get('clearkey', {}).get('licenseUrl')
-            if not lic_url:
-                self.log("[CLEARKEY] ❌ licenseUrl для Clearkey не найден")
-                raise KeyError("Clearkey licenseUrl отсутствует")
+                    if kid_hex:
+                        keys_ck = self.get_clearkey_key(license_url_ck, kid_hex, referer)
+                        if keys_ck:
+                            if self.run_n_m3u8dl(m3u8_url, keys_ck, quality, save_dir, save_name, "ClearKey"):
+                                self.log(f"\n{'=' * 60}")
+                                self.log(f"[PIPELINE] ✓ УСПЕХ: Видео скачано через ClearKey DRM")
+                                self.log(f"{'=' * 60}\n")
+                                return True
+                    else:
+                        self.log("[CLEARKEY] ⚠️ KID не найден, пропуск метода")
+                else:
+                    self.log("[CLEARKEY] ⚠️ licenseUrl для ClearKey не найден")
+            except Exception as e:
+                self.log(f"[CLEARKEY] ⚠️ Способ 3 (ClearKey) завершился с ошибкой: {e}")
 
-            self.log(f"[CLEARKEY] Отправка запроса на лицензионный сервер: {lic_url[:60]}...")
-
-            # Формируем KID в base64 без padding
-            kid_b64 = b64encode(bytes.fromhex(kid_hex)).decode().rstrip('=')
-
-            # Отправляем запрос к Clearkey серверу
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                'Referer': referer,
-                'Origin': referer.split('/')[0] + '//' + referer.split('/')[2] if referer else '',
-                'Content-Type': 'application/json'
-            }
-
-            payload = {
-                "kids": [kid_b64],
-                "type": "temporary"
-            }
-
-            resp = requests.post(lic_url, json=payload, headers=headers, timeout=15)
-            resp.raise_for_status()
-            license_data = resp.json()
-            self.log(f"[CLEARKEY] ✓ Ответ сервера получен")
-
-            if 'keys' not in license_data or not license_data['keys']:
-                self.log("[CLEARKEY] ❌ Ключи не найдены в ответе сервера")
-                raise ValueError("Ключи отсутствуют в ответе")
-
-            # Извлекаем ключ - правильно формируем KID:KEY
-            key_data = license_data['keys'][0]
-            key_hex = b64decode(key_data['k'] + '==').hex()
-            key_param = f"{kid_hex}:{key_hex}"
-
-            self.log(
-                f"[CLEARKEY] Извлечён ключ: KID={key_param.split(':')[0][:8]}... | KEY={key_param.split(':')[1][:8]}...")
-
-            # Запускаем скачивание с правильным ключом
-            if self.run_n_m3u8dl(m3u8_url, [key_param], quality, save_dir, save_name, "Clearkey"):
-                self.log(f"\n{'=' * 60}")
-                self.log(f"[PIPELINE] ✓ УСПЕХ: Видео скачано через Clearkey DRM")
-                self.log(f"{'=' * 60}\n")
-                return True
-
-
-        except Exception as e:
-            self.log(f"[CLEARKEY] ⚠️ Способ 3 (Clearkey) завершился с ошибкой: {type(e).__name__}: {str(e)}")
 
         # === СПОСОБ 4: KEYLESS ===
         self.log("\n[PIPELINE] === СПОСОБ 4: БЕЗ КЛЮЧЕЙ (открытый поток) ===")
@@ -470,6 +440,83 @@ class KinescopeLogic:
         self.log(f"[PIPELINE] ❌ ОШИБКА: Все методы скачивания исчерпаны")
         self.log(f"{'=' * 60}\n")
         return False
+
+    def extract_kid_from_json(self, video_item):
+        """Извлекает KID из структуры данных видео"""
+        # Поиск в drmInfo (стандартное место в логах Kinescope)
+        drm_info = video_item.get('state', {}).get('driver', {}).get('drmInfo', {})
+        if 'kid' in drm_info:
+            return drm_info['kid'].replace('-', '')
+
+        # Поиск в debugData
+        debug = video_item.get('state', {}).get('driver', {}).get('debugData', {})
+        if 'kid' in debug:
+            return debug['kid'].replace('-', '')
+
+        return None
+
+    def extract_kid_from_manifest(self, mpd_url, referer):
+        """Извлекает KID из MPD манифеста"""
+        self.log(f"[CLEARKEY] Попытка извлечь KID из манифеста: {mpd_url[:60]}...")
+        try:
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Referer': referer
+            }
+            response = requests.get(mpd_url, headers=headers, timeout=10)
+            response.raise_for_status()
+
+            # Поиск через default_KID
+            kid_match = re.search(r'cenc:default_KID="([^"]+)"', response.text)
+            if kid_match:
+                kid_hex = kid_match.group(1).replace('-', '')
+                self.log(f"[CLEARKEY] ✓ KID найден в манифесте: {kid_hex}")
+                return kid_hex
+        except Exception as e:
+            self.log(f"[CLEARKEY] ⚠️ Ошибка при чтении манифеста для KID: {e}")
+        return None
+
+    def get_clearkey_key(self, license_url, kid_hex, referer):
+        """Получает ключ дешифрования через ClearKey"""
+        self.log("[CLEARKEY] === НАЧАЛО ПОЛУЧЕНИЯ CLEARKEY ===")
+        try:
+            # Подготовка KID в формате base64url без набивки
+            kid_bytes = bytes.fromhex(kid_hex)
+            kid_b64url = b64encode(kid_bytes).decode().replace('+', '-').replace('/', '_').rstrip('=')
+
+            headers = {
+                'User-Agent': 'Mozilla/5.0',
+                'Referer': referer,
+                'Content-Type': 'application/json'
+            }
+            payload = {
+                "kids": [kid_b64url],
+                "type": "temporary"
+            }
+
+            self.log(f"[CLEARKEY] Запрос к лицензионному серверу: {license_url}")
+            response = requests.post(license_url, json=payload, headers=headers, timeout=10)
+            response.raise_for_status()
+            data = response.json()
+
+            if 'keys' in data and data['keys']:
+                key_data = data['keys'][0]
+                raw_k = key_data['k']
+
+                # Декодирование ключа из base64url в hex
+                padding = '=' * (-len(raw_k) % 4)
+                k_b64 = raw_k.replace('-', '+').replace('_', '/') + padding
+                key_hex = b64decode(k_b64).hex()
+
+                res_key = f"{kid_hex.lower()}:{key_hex}"
+                self.log(f"[CLEARKEY] ✓ Ключ успешно получен: {res_key}")
+                return [res_key]
+
+            self.log("[CLEARKEY] ❌ Ключи не найдены в ответе сервера")
+            return []
+        except Exception as e:
+            self.log(f"[CLEARKEY] ❌ Ошибка ClearKey: {e}")
+            return []
 
     def get_keys_from_log_json(self, json_path):
         """
@@ -526,3 +573,21 @@ class KinescopeLogic:
             # Исправлено: заменено self.logger на self.log
             self.log(f"❌ Ошибка при разборе JSON-лога: {e}")
             return None
+
+        ################### временно
+
+    def check_drm_support(self, data):
+        """
+        Проверяет, поддерживается ли текущая система DRM.
+        """
+        # Путь к данным о защите в структуре Kinescope
+        drm_info = data.get('state', {}).get('driver', {}).get('drmInfo', {})
+        key_system = drm_info.get('keySystem')
+
+        # Если это Widevine (com.widevine.alpha), выводим вашу ошибку
+        if key_system == "com.widevine.alpha":
+            self.log("❌ Ошибка, пока мы не можем скачать такое видео")
+            return False
+
+        # ClearKey (org.w3.clearkey) и видео без защиты продолжаем обрабатывать
+        return True
