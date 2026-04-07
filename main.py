@@ -7,6 +7,7 @@ import traceback
 from concurrent.futures import ThreadPoolExecutor
 from downloader_logic import KinescopeLogic
 
+APP_VERSION = "1.0.0"
 
 class Api:
     def __init__(self):
@@ -150,11 +151,16 @@ class Api:
 
 def main():
     api = Api()
-    webview.create_window(
-        'DOBRO LOADER PRO', 'index.html', js_api=api,
+    window = webview.create_window(
+        f'DOBRO LOADER {APP_VERSION}',  # Версия в заголовке окна
+        'index.html',
+        js_api=api,
         width=900, height=500, resizable=True
     )
-    webview.start()
+    def set_version():
+        window.evaluate_js(f"document.getElementById('app-version').innerText = '{APP_VERSION}';")
+
+    webview.start(set_version)
 
 
 if __name__ == '__main__':
